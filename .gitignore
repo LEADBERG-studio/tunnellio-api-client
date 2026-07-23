@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+
+# Build artifacts
+build/
+dist/
+artifacts/
+*.spec.tmp
+
+# Test artifacts
+.pytest_cache/
+test-artifacts/
+ssh-e2e.log
+ssh-e2e.err.log
+api_peer.pem
+tunnel_peer.pem
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local config
+agent-repo-config.local.json
+*.log
