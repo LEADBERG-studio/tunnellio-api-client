@@ -1,5 +1,6 @@
 param(
-    [string]$Version = ""
+    [string]$Version = "",
+    [string]$Ref = "HEAD"
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,29 +15,20 @@ if (-not $Version) {
     $Version = $VersionMatch.Matches[0].Groups[1].Value
 }
 
+& git rev-parse --verify $Ref *> $null
+if ($LASTEXITCODE -ne 0) {
+    throw "Git ref not found: $Ref"
+}
+
 $ArchivePath = Join-Path $Root ("artifacts\tunnellio-source-v$Version.zip")
-if (Test-Path $ArchivePath) { Remove-Item $ArchivePath -Force }
+if (Test-Path $ArchivePath) {
+    Remove-Item $ArchivePath -Force
+}
 
-$SourceItems = @(
-    "README.md",
-    "CHANGELOG.md",
-    "pyproject.toml",
-    "requirements-build.txt",
-    "tunnellio.spec",
-    "config.example.json",
-    "LOCAL_E2E_TESTS.md",
-    "run_local_e2e.ps1",
-    "HELPER_CONTRACT.md",
-    "TECHNICAL_PLAN.md",
-    "TECHNICAL_REQUIREMENTS.md",
-    "docs",
-    "scripts",
-    "src",
-    "tests",
-    "live_test_suite.py",
-    "local_e2e_tests.py",
-    "enable_insecure_tls.py"
-)
+& git archive --format=zip "--output=$ArchivePath" $Ref
+if ($LASTEXITCODE -ne 0) {
+    throw "git archive failed for ref $Ref"
+}
 
-Compress-Archive -Path $SourceItems -DestinationPath $ArchivePath -Force
 Write-Host "Source archive ready: $ArchivePath"
+Write-Host "Archived git ref: $Ref"
