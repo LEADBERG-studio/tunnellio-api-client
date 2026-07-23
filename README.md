@@ -2,129 +2,160 @@
 
 Клиент для Tunnellio Integration API с упором на production-использование через системный OpenSSH.
 
-## Текущий формат поставки
-Этот репозиторий готовится под **вариант A**:
-- пользователь сам собирает **Windows binary** из исходников;
-- итоговый артефакт — `tunnellio.exe`;
-- на целевой машине должен быть установлен **OpenSSH Client**;
-- сам туннель по-прежнему поднимается через системный `ssh`, а клиент отвечает за API orchestration, TLS, планирование и диагностику.
+## Формат поставки
+Поддерживаются два сценария:
+
+1. **Сборка из исходников** для разработчика или администратора
+2. **Готовый релизный бинарник** для конечного пользователя
+
+### Важный нюанс
+Для сборки бинарника из исходников нужна подготовленная build-среда:
+- Python 3.11+
+- pip
+- build dependencies
+- OpenSSH Client для тестов и runtime-проверок
+
+Но **для использования готового релизного бинарника Python на целевой машине не нужен**.
+Нужны только:
+- `tunnellio.exe`
+- системный OpenSSH Client
+- токен API
 
 ## Что реализовано
 - Bearer auth для POST-only API
 - discovery через `POST /v1/meta`
 - capability-aware planning через `POST /v1/capabilities`
-- резолв existing key/domain через `POST /v1/keys/list` и `POST /v1/domains/list`
 - orchestration через `POST /v1/launch-spec`
 - запуск SSH через `connect --run`
+- supervised mode через `connect --run --watch`
+- health-check публичного URL
+- автоматический restart туннеля при обрыве SSH или деградации health-check
+- локальный runtime registry
+- обязательное runtime-имя у каждого туннеля
+- авто-генерация имени, если оно не задано явно
+- просмотр активных managed tunnels через `status`
+- адресная остановка tunnel по имени через `stop --name`
+- получение runtime config / connection params по имени через `show-config --name`
+- запуск через default config и client config
+- образец полного конфига `config.example.json`
+- автоматика обновления default config перед запуском
+- управляемая перезапись client config (`ask` / `yes` / `no`)
+- structured status file
+- readable runtime logs
 - graceful completion ephemeral session через `POST /v1/sessions/complete`
 - локальный e2e runner
 - Windows TLS через `windows-truststore`
 
-## Production-идея
-Клиент не заменяет `ssh`. Он:
-1. общается с API;
-2. получает `launch-spec` / `connectionProfile`;
-3. запускает системный `ssh`;
-4. пишет понятные логи;
-5. умеет завершать ephemeral session.
+## Почему это важно не только для пользователя, но и для интеграции
+Принятые правки нужны не только для удобства ручного использования.
+Они закрывают и обязательный интеграционный сценарий:
 
-Для постоянной эксплуатации туннеля клиент лучше запускать под внешним supervisor:
-- Windows: NSSM / WinSW / Task Scheduler
-- Linux: systemd / supervisor
+- туннель может подниматься вызывающим приложением;
+- домен может быть не фиксированным, а случайным или эфемерным;
+- после запуска вызывающее приложение должно уметь не только останавливать и проверять туннель, но и получать из клиента фактические серверные параметры подключения;
+- минимум — конечный домен / hostname / public URL.
 
-## Требования
-### Для запуска из исходников
-- Python 3.11+
-- OpenSSH Client в PATH
+Именно для этого у каждого managed tunnel теперь есть runtime name и runtime config snapshot, доступный по имени.
 
-### Для production binary на Windows
-- собранный `tunnellio.exe`
-- установленный OpenSSH Client
+## Конфигурационная модель
+Клиент работает через конфиг как через канонический источник запуска.
 
-## Быстрый старт из исходников
+### Default config
+Если явный `--config` не передан, используется default config:
+- путь по умолчанию: `~/.tunnellio/default-launch.json`
+- если запуск сделан с CLI-флагами, клиент **сначала обновляет default config**, затем **запускается уже с него**
+- после этого можно просто запускать бинарник без аргументов
+
+### Client config
+Если передан `--config path\\to\\client.json`, тогда этот config считается клиентским.
+
+Поведение при запуске с CLI-параметрами и явным config:
+1. если config уже существует и параметры меняют его содержимое, клиент спрашивает — переписывать или нет;
+2. `--config-overwrite yes` — переписывает config и запускается с обновлённого файла;
+3. `--config-overwrite no` — файл **не** переписывает, но в текущем запуске CLI-параметры имеют приоритет над совпадающими полями конфига;
+4. если config не существует, он создаётся и запуск идёт уже с него.
+
+## Имя туннеля
+Теперь **у каждого managed tunnel всегда есть имя**.
+
+- если имя задано явно через `--name`, используется оно;
+- если имя не задано, клиент генерирует его автоматически;
+- имя попадает в runtime registry;
+- имя видно в `status`;
+- по имени можно:
+  - получить статус;
+  - остановить туннель;
+  - получить runtime config с параметрами подключения.
+
+## Что вызывает приложение при случайном домене
+Если вызывающее приложение использует `random` / `ephemeral` домен, оно не должно полагаться только на исходные параметры запуска.
+После старта оно должно получить из клиента уже разрешённые сервером данные подключения.
+
+Рекомендуемый поток:
+1. запустить туннель и по возможности сразу задать `--name`;
+2. дождаться появления runtime entry;
+3. вызвать:
 ```powershell
-python -m pip install -e .
-python -m tunnellio.cli --token YOUR_TOKEN meta
+.\tunnellio.exe show-config --name app-backend
+```
+4. считать из ответа фактический домен / public URL / connection data;
+5. дальше использовать то же имя для `status --name` и `stop --name`.
+
+## Готовый бинарник: базовое использование
+### Seed default config и запуск supervised tunnel
+```powershell
+.\tunnellio.exe --token YOUR_TOKEN connect --domain existing:mcp --local-port 3000 --run --watch --name prod-api --health-path / --log-file .\logs\tunnel.log
 ```
 
-## Сборка Windows binary из исходников
-Полная инструкция: `docs/BUILD_WINDOWS.md`
-
-Коротко:
+### Повторный запуск только из default config
 ```powershell
-python -m pip install -e .
-python -m pip install -r requirements-build.txt
-.\scripts\build_windows_binary.ps1
-.\scripts\build_release_archive.ps1
+.\tunnellio.exe
 ```
 
-## Основные команды
-### API metadata
+### Запуск по client config
 ```powershell
-python -m tunnellio.cli --token YOUR_TOKEN --verbose meta
+.\tunnellio.exe --config .\configs\prod-api.json
 ```
 
-### Capabilities
+## Управление активными туннелями
+### Показать все managed tunnels
 ```powershell
-python -m tunnellio.cli --token YOUR_TOKEN capabilities
+.\tunnellio.exe status
 ```
 
-### План для нового persistent domain
+### Показать статус tunnel по имени
 ```powershell
-python -m tunnellio.cli --token YOUR_TOKEN plan --domain new:mcp-dev --key existing:work-laptop --domain-lifetime-days 30 --local-port 3000 --save-profile
+.\tunnellio.exe status --name prod-api
 ```
 
-### План для random ephemeral domain
+### Остановить tunnel по имени
 ```powershell
-python -m tunnellio.cli --token YOUR_TOKEN plan --domain random --key existing:work-laptop --local-port 3000
+.\tunnellio.exe stop --name prod-api
 ```
 
-### Запуск SSH и auto-complete ephemeral session
+### Остановить все активные managed tunnels
 ```powershell
-python -m tunnellio.cli --token YOUR_TOKEN connect --domain random --key existing:work-laptop --local-port 3000 --run
+.\tunnellio.exe stop --all
 ```
 
-## Локальные тесты
-### API-only
+### Получить runtime config и connection params по имени
 ```powershell
-.\run_local_e2e.ps1 -Token "YOUR_TOKEN" -Mode api -VerboseOutput
+.\tunnellio.exe show-config --name prod-api
 ```
 
-### Full e2e
-```powershell
-.\run_local_e2e.ps1 -Token "YOUR_TOKEN" -Mode full -VerboseOutput
-```
-
-Подробности: `LOCAL_E2E_TESTS.md` и `docs/TESTING.md`
-
-## Файлы сборки и релизов
-- `requirements-build.txt` — зависимости для сборки binary
-- `tunnellio.spec` — конфигурация PyInstaller
-- `scripts/build_windows_binary.ps1` — сборка `.exe` и staging release-папки
-- `scripts/build_release_archive.ps1` — упаковка staging-папки в `.zip`
+## Файлы конфигурации
+- `config.example.json` — полный образец конфига проекта
+- `~/.tunnellio/default-launch.json` — автоматически поддерживаемый default config
+- `~/.tunnellio/configs/` — рекомендуемое место для client config-файлов
+- `~/.tunnellio/state/runtimes/*.json` — runtime status
+- `~/.tunnellio/state/runtimes/*.config.json` — runtime config snapshots
 
 ## Документация
 - `docs/README.md`
 - `docs/BUILD_WINDOWS.md`
+- `docs/CONFIGS.md`
+- `docs/INTEGRATION.md`
 - `docs/OPERATIONS.md`
 - `docs/TESTING.md`
 - `docs/VERSIONING.md`
 - `docs/RELEASES.md`
-
-## Контроль версий
-Репозиторий подготовлен под старт git-версирования:
-- `.gitignore` добавлен
-- версия проекта хранится в `pyproject.toml` и `src/tunnellio/__init__.py`
-- changelog: `CHANGELOG.md`
-
-## Реальные API endpoints
-- `POST /v1/meta`
-- `POST /v1/capabilities`
-- `POST /v1/keys`
-- `POST /v1/keys/list`
-- `POST /v1/domains`
-- `POST /v1/domains/list`
-- `POST /v1/domains/check`
-- `POST /v1/domains/connection-profile`
-- `POST /v1/sessions/complete`
-- `POST /v1/launch-spec`

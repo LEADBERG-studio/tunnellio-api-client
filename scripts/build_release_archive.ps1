@@ -8,7 +8,11 @@ $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
 if (-not $Version) {
-    $Version = & $Python -c "import re, pathlib; text=pathlib.Path('pyproject.toml').read_text(encoding='utf-8'); m=re.search(r'^version\s*=\s*\"([^\"]+)\"', text, re.M); print(m.group(1))"
+    $VersionMatch = Select-String -Path "pyproject.toml" -Pattern '^version\s*=\s*"([^"]+)"'
+    if (-not $VersionMatch) {
+        throw "Version not found in pyproject.toml"
+    }
+    $Version = $VersionMatch.Matches[0].Groups[1].Value
 }
 
 $StageDir = Join-Path $Root ("artifacts\tunnellio-windows-x64-v$Version")

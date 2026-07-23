@@ -21,6 +21,9 @@ ssh-e2e.err.log
 api_peer.pem
 tunnel_peer.pem
 
+# Local release workspace
+releases/
+
 # OS / editors
 .DS_Store
 Thumbs.db

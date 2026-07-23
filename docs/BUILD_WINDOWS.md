@@ -6,60 +6,51 @@ Variant A:
 - tunnel transport: system `ssh`
 - target environment must provide OpenSSH Client
 
-## Prerequisites
-- Windows x64
-- Python 3.11+
-- `python` in PATH
-- OpenSSH Client in PATH
-
-Check SSH:
-```powershell
-ssh -V
-ssh-keygen -V
-```
-
-## One-time setup
-```powershell
-python -m pip install -e .
-python -m pip install -r requirements-build.txt
-```
+## Runtime behavior of the ready binary
+- every managed tunnel gets a runtime name
+- if no name is provided, the client generates one automatically
+- runtime names are shown in `status`
+- tunnels can be stopped by name
+- runtime config / connection params can be read back by name
 
 ## Build command
 ```powershell
 .\scripts\build_windows_binary.ps1
 ```
 
-## What the build script does
-1. installs package dependencies
-2. installs build dependencies
-3. runs local compile/test checks unless `-SkipTests` is passed
-4. builds `dist\tunnellio.exe` via PyInstaller
-5. creates a staged release directory under `artifacts\tunnellio-windows-x64-v<version>`
-6. copies binary + docs + test runner files into that staged directory
+## What goes into the release folder
+- `tunnellio.exe`
+- `config.example.json`
+- `README.md`
+- `docs\*`
 
-## Optional flags
+## Recommended runtime commands
+### Seed default config and launch a named tunnel
 ```powershell
-.\scripts\build_windows_binary.ps1 -Clean
-.\scripts\build_windows_binary.ps1 -SkipTests
-.\scripts\build_windows_binary.ps1 -Version 0.1.1
+.\dist\tunnellio.exe --token YOUR_TOKEN connect --domain existing:mcp --local-port 3000 --run --watch --name prod-api
 ```
 
-## Files produced
-- `dist\tunnellio.exe`
-- `artifacts\tunnellio-windows-x64-v<version>\`
-
-## Create downloadable archive
+### Re-launch from saved default config
 ```powershell
-.\scripts\build_release_archive.ps1
+.\dist\tunnellio.exe
 ```
 
-This creates:
-- `artifacts\tunnellio-windows-x64-v<version>.zip`
-
-## Smoke test built binary
+### List tunnel names
 ```powershell
-.\dist\tunnellio.exe --token YOUR_TOKEN --verbose meta
+.\dist\tunnellio.exe status
 ```
 
-## Production note
-The binary does not embed SSH. The target machine still needs system OpenSSH.
+### Check one tunnel by name
+```powershell
+.\dist\tunnellio.exe status --name prod-api
+```
+
+### Stop one tunnel by name
+```powershell
+.\dist\tunnellio.exe stop --name prod-api
+```
+
+### Read runtime config by name
+```powershell
+.\dist\tunnellio.exe show-config --name prod-api
+```

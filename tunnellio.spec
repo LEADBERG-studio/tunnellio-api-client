@@ -1,6 +1,6 @@
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parent
+project_root = Path.cwd()
 
 block_cipher = None
 

@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "command": "connect",
+  "global": {
+    "token": "PUT_YOUR_API_TOKEN_HERE",
+    "baseUrl": "https://api.tunnellio.ru",
+    "stateDir": "~/.tunnellio",
+    "insecureTls": false,
+    "verbose": true
+  },
+  "meta": {
+    "output": "json"
+  },
+  "capabilities": {
+    "output": "json"
+  },
+  "plan": {
+    "output": "json",
+    "keySelector": "existing:mcp",
+    "publicKeyPath": null,
+    "domainSelector": "existing:mcp",
+    "keyLifetimeDays": null,
+    "domainLifetimeDays": null,
+    "note": "",
+    "localHost": "127.0.0.1",
+    "localPort": 3000,
+    "saveProfile": false
+  },
+  "connect": {
+    "output": "text",
+    "keySelector": "existing:mcp",
+    "publicKeyPath": null,
+    "domainSelector": "existing:mcp",
+    "keyLifetimeDays": null,
+    "domainLifetimeDays": null,
+    "note": "",
+    "localHost": "127.0.0.1",
+    "localPort": 3000,
+    "saveProfile": false,
+    "run": true,
+    "watch": true,
+    "name": "prod-api",
+    "healthPath": "/",
+    "healthInterval": 15,
+    "healthTimeout": 10,
+    "healthFailures": 3,
+    "restartDelay": 5,
+    "maxRestarts": 0,
+    "logFile": "~/.tunnellio/logs/tunnel.log",
+    "statusFile": null,
+    "stopFile": null
+  },
+  "status": {
+    "output": "text",
+    "name": null,
+    "pid": null
+  },
+  "stop": {
+    "output": "text",
+    "all": true,
+    "name": null,
+    "pid": null,
+    "force": false,
+    "graceSeconds": 3
+  },
+  "showConfig": {
+    "output": "json",
+    "name": "prod-api",
+    "pid": null
+  },
+  "paths": {
+    "defaultConfig": "~/.tunnellio/default-launch.json",
+    "clientConfigsDir": "~/.tunnellio/configs",
+    "runtimeDir": "~/.tunnellio/state/runtimes"
+  }
+}
