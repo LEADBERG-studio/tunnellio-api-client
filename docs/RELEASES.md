@@ -1,46 +1,44 @@
 # Release packaging guide
 
 ## Goal
-Produce a downloadable zip archive containing:
-- `tunnellio.exe`
-- `config.example.json`
-- top-level README
-- local e2e docs and scripts
-- full `docs/` folder
+Prepare two different release artifacts:
+- standalone Windows binary: `tunnellio.exe`
+- universal source archive: `tunnellio-source-v<version>.zip`
 
-The final user should be able to unpack the release and run the binary directly without Python.
+The binary is Windows-specific.
+The source archive is platform-neutral and contains the Python project files.
 
-## Step 1: build binary and stage folder
+## Step 1: build Windows binary
 ```powershell
 .\scripts\build_windows_binary.ps1
 ```
 
-## Step 2: pack archive
+## Step 2: build universal source archive
 ```powershell
 .\scripts\build_release_archive.ps1
 ```
 
 ## Output
-- staged folder: `artifacts\tunnellio-windows-x64-v<version>\`
-- archive: `artifacts\tunnellio-windows-x64-v<version>.zip`
+- Windows stage folder: `artifacts\tunnellio-windows-x64-v<version>\`
+- universal source archive: `artifacts\tunnellio-source-v<version>.zip`
 
-## What goes into the downloadable package
+## What goes into the source archive
+- project source under `src/`
+- helper scripts
+- docs
+- tests
+- config example
+- project metadata files
+
+The Windows binary does **not** go into the source archive.
+
+## What goes into the prepared local release folder
 - `tunnellio.exe`
-- `config.example.json`
-- `README.md`
-- `LOCAL_E2E_TESTS.md`
-- `run_local_e2e.ps1`
-- `docs\*`
+- `tunnellio-source-v<version>.zip`
+- `GITHUB_RELEASE.md`
 
 ## Recommended release notes
-Document these ready-binary commands for end users:
-```powershell
-.\tunnellio.exe --token YOUR_TOKEN connect --domain existing:mcp --local-port 3000 --run --watch --name prod-api
-.\tunnellio.exe
-.\tunnellio.exe --config .\configs\prod-api.json --config-overwrite yes --token YOUR_TOKEN connect --domain existing:mcp --local-port 3000 --run --watch --name prod-api
-.\tunnellio.exe status
-.\tunnellio.exe stop --all
-```
-
-## Target-machine requirement
-The package is Variant A, so it expects system OpenSSH to be installed on the destination machine.
+Document that:
+- `tunnellio.exe` is the ready Windows binary
+- `tunnellio-source-v<version>.zip` is the universal Python/source package
+- the source archive can be used outside Windows, subject to Python/OpenSSH/runtime requirements

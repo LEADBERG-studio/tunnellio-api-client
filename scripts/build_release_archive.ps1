@@ -1,6 +1,5 @@
 param(
-    [string]$Version = "",
-    [string]$Python = "python"
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,12 +14,29 @@ if (-not $Version) {
     $Version = $VersionMatch.Matches[0].Groups[1].Value
 }
 
-$StageDir = Join-Path $Root ("artifacts\tunnellio-windows-x64-v$Version")
-if (-not (Test-Path $StageDir)) {
-    throw "Stage directory not found: $StageDir. Run .\scripts\build_windows_binary.ps1 first."
-}
-
-$ArchivePath = Join-Path $Root ("artifacts\tunnellio-windows-x64-v$Version.zip")
+$ArchivePath = Join-Path $Root ("artifacts\tunnellio-source-v$Version.zip")
 if (Test-Path $ArchivePath) { Remove-Item $ArchivePath -Force }
-Compress-Archive -Path (Join-Path $StageDir '*') -DestinationPath $ArchivePath -Force
-Write-Host "Archive ready: $ArchivePath"
+
+$SourceItems = @(
+    "README.md",
+    "CHANGELOG.md",
+    "pyproject.toml",
+    "requirements-build.txt",
+    "tunnellio.spec",
+    "config.example.json",
+    "LOCAL_E2E_TESTS.md",
+    "run_local_e2e.ps1",
+    "HELPER_CONTRACT.md",
+    "TECHNICAL_PLAN.md",
+    "TECHNICAL_REQUIREMENTS.md",
+    "docs",
+    "scripts",
+    "src",
+    "tests",
+    "live_test_suite.py",
+    "local_e2e_tests.py",
+    "enable_insecure_tls.py"
+)
+
+Compress-Archive -Path $SourceItems -DestinationPath $ArchivePath -Force
+Write-Host "Source archive ready: $ArchivePath"

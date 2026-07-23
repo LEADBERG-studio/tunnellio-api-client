@@ -18,11 +18,24 @@ Variant A:
 .\scripts\build_windows_binary.ps1
 ```
 
-## What goes into the release folder
-- `tunnellio.exe`
-- `config.example.json`
-- `README.md`
-- `docs\*`
+## What goes into the Windows build output
+- `dist\tunnellio.exe`
+- `artifacts\tunnellio-windows-x64-v<version>\` — local Windows staging folder only
+
+## Important packaging rule
+The Windows binary is a standalone artifact.
+It is **not** embedded into the universal source archive.
+
+## Universal source archive
+Build separately with:
+```powershell
+.\scripts\build_release_archive.ps1
+```
+
+This produces:
+- `artifacts\tunnellio-source-v<version>.zip`
+
+That archive is platform-neutral and contains the Python project files, not the Windows binary.
 
 ## Recommended runtime commands
 ### Seed default config and launch a named tunnel
