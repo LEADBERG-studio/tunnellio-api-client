@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.6
+- Aligned the client with the new discovery, auth, and session contract
+- Added OAuth discovery helpers, PKCE utilities, and extended session-aware planning/runtime metadata
+- Added live-validated session lifecycle handling with resume-token aware heartbeat, resume, and close calls
+- Expanded config, runtime snapshots, tests, and docs for the new server contract
+
 ## 0.1.5
 - Added mandatory runtime names for every managed tunnel
 - Added automatic runtime-name generation when name is not provided
