@@ -43,6 +43,10 @@
 - structured status file
 - readable runtime logs
 - graceful completion ephemeral session через `POST /v1/sessions/complete`
+- session-aware runtime cycle: `open -> heartbeat -> resume -> close`
+- OAuth discovery через `GET /.well-known/oauth-authorization-server`
+- config-поля `requestedAuthMode`, `connectionMode`, `oauthClientPolicy`, `runtimeName`, `useDiscovery`, `sessionStrategy`, `enablePkce`
+- сервер остаётся источником истины по итоговому `authMode` / `connectionMode`; клиент проверяет и отражает фактический результат
 - локальный e2e runner
 - Windows TLS через `windows-truststore`
 

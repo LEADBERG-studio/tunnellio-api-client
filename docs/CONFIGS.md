@@ -92,6 +92,31 @@ If `--config path.json` is passed and CLI flags also provide values:
 .\tunnellio.exe show-config --name prod-api
 ```
 
+## New server-contract fields
+The launch config now carries the session/auth knobs required by the new server contract.
+
+For `plan` and `connect`, the important additional fields are:
+- `requestedAuthMode`
+- `connectionMode`
+- `oauthClientPolicy`
+- `runtimeName`
+- `useDiscovery`
+- `sessionStrategy`
+- `enablePkce`
+
+Practical meaning:
+- `requestedAuthMode` asks the server for `legacy`, `oauth`, or another supported mode
+- `connectionMode` pins the transport mode when the server supports multiple connection paths
+- `oauthClientPolicy` tells the server which OAuth client strategy to use
+- `runtimeName` gives the server and local runtime registry the same stable identifier
+- `useDiscovery` enables or disables OAuth discovery loading
+- `sessionStrategy` lets the client describe how session open/resume should be handled
+- `enablePkce` asks the planner/runtime to prepare PKCE-capable OAuth flows
+
+Important runtime rule:
+- requested modes are intent, not a local override of server truth
+- the client still records and validates the final `authMode` / `connectionMode` returned by the server
+
 ## Runtime registry artifacts
 - `~/.tunnellio/state/runtimes/<name>.json` — runtime status
 - `~/.tunnellio/state/runtimes/<name>.config.json` — runtime config snapshot with connection data

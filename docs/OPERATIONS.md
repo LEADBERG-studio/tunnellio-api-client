@@ -17,6 +17,8 @@ The client adds:
 - runtime config snapshots retrievable by name
 - config-first launch model
 - ephemeral session completion
+- session lifecycle management: open, heartbeat, resume, close
+- resume-token aware session maintenance for heartbeat/close/resume calls
 
 ## Transport model
 The actual tunnel is still created by system `ssh` with reverse forwarding.

@@ -1,6 +1,9 @@
+import json
 from pathlib import Path
 
-from tunnellio.cli import build_parser, _apply_explicit_overrides, _prepare_execution_config
+from tunnellio.cli import build_parser, _apply_explicit_overrides, _prepare_execution_config, _write_runtime_connection_snapshot
+from tunnellio.planner import Planner, PlanOptions
+from tests.test_planner import DummyClient, DummyConfig
 
 
 
@@ -135,3 +138,89 @@ def test_prepare_execution_config_keeps_client_config_when_overwrite_disabled(tm
     saved = config_path.read_text(encoding='utf-8')
     assert 'existing:old' in saved
     assert 'existing:new' not in saved
+
+
+def test_connect_parser_accepts_new_server_contract_flags() -> None:
+    parser = build_parser()
+    args = parser.parse_args([
+        'connect',
+        '--requested-auth-mode', 'oauth',
+        '--connection-mode', 'cloud_proxy',
+        '--oauth-client-policy', 'shared',
+        '--runtime-name', 'prod-api',
+        '--use-discovery',
+        '--session-strategy', 'open_then_launch',
+        '--enable-pkce',
+    ])
+    assert args.requested_auth_mode == 'oauth'
+    assert args.connection_mode == 'cloud_proxy'
+    assert args.oauth_client_policy == 'shared'
+    assert args.runtime_name == 'prod-api'
+    assert args.use_discovery is True
+    assert args.session_strategy == 'open_then_launch'
+    assert args.enable_pkce is True
+
+
+def test_apply_explicit_overrides_updates_new_contract_fields() -> None:
+    parser = build_parser()
+    args = parser.parse_args([
+        'connect',
+        '--requested-auth-mode', 'oauth',
+        '--connection-mode', 'cloud_proxy',
+        '--oauth-client-policy', 'shared',
+        '--runtime-name', 'prod-api',
+        '--use-discovery',
+        '--session-strategy', 'open_then_launch',
+        '--enable-pkce',
+    ])
+    base = {
+        'command': 'connect',
+        'global': {},
+        'connect': {
+            'requestedAuthMode': None,
+            'connectionMode': None,
+            'oauthClientPolicy': None,
+            'runtimeName': None,
+            'useDiscovery': False,
+            'sessionStrategy': None,
+            'enablePkce': False,
+        },
+    }
+    updated = _apply_explicit_overrides(base, args)
+    assert updated['connect']['requestedAuthMode'] == 'oauth'
+    assert updated['connect']['connectionMode'] == 'cloud_proxy'
+    assert updated['connect']['oauthClientPolicy'] == 'shared'
+    assert updated['connect']['runtimeName'] == 'prod-api'
+    assert updated['connect']['useDiscovery'] is True
+    assert updated['connect']['sessionStrategy'] == 'open_then_launch'
+    assert updated['connect']['enablePkce'] is True
+
+
+def test_runtime_connection_snapshot_contains_auth_and_runtime_contracts(tmp_path: Path) -> None:
+    planner = Planner(DummyClient(), DummyConfig())
+    result = planner.build_plan(
+        PlanOptions(
+            key_selector='existing:work',
+            domain_selector='existing:demo',
+            requested_auth_mode='oauth',
+            connection_mode='cloud_proxy',
+            runtime_name='prod-api',
+            enable_pkce=True,
+        )
+    )
+    target = tmp_path / 'prod-api.config.json'
+    status_path = tmp_path / 'prod-api.json'
+    stop_path = tmp_path / 'prod-api.stop'
+    _write_runtime_connection_snapshot(
+        target,
+        runtime_name='prod-api',
+        execution_config={'command': 'connect'},
+        result=result,
+        status_path=status_path,
+        stop_path=stop_path,
+    )
+    payload = json.loads(target.read_text(encoding='utf-8'))
+    assert payload['auth']['authMode'] == 'oauth'
+    assert payload['runtime']['name'] == 'prod-api'
+    assert payload['transport']['publicUrl'] == 'https://demo.tunnellio.site'
+    assert payload['session']['resumeToken'] == 'resume_123'

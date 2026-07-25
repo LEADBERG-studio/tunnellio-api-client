@@ -1,7 +1,86 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+
+
+
+def _str_or_none(value: Any) -> str | None:
+    return None if value is None else str(value)
+
+
+
+def _int_or_none(value: Any) -> int | None:
+    return None if value is None else int(value)
+
+
+
+def _bool_or_none(value: Any) -> bool | None:
+    return None if value is None else bool(value)
+
+
+
+def _list_of_strings(value: Any) -> list[str]:
+    if value is None:
+        return []
+    return [str(item) for item in value]
+
+
+@dataclass(slots=True)
+class DiscoveryMetadata:
+    issuer: str | None = None
+    authorization_endpoint: str | None = None
+    token_endpoint: str | None = None
+    introspection_endpoint: str | None = None
+    revocation_endpoint: str | None = None
+    registration_endpoint: str | None = None
+    jwks_uri: str | None = None
+    code_challenge_methods_supported: list[str] = field(default_factory=list)
+    grant_types_supported: list[str] = field(default_factory=list)
+    response_types_supported: list[str] = field(default_factory=list)
+    scopes_supported: list[str] = field(default_factory=list)
+    token_endpoint_auth_methods_supported: list[str] = field(default_factory=list)
+    introspection_endpoint_auth_methods_supported: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_api(cls, payload: dict[str, Any]) -> 'DiscoveryMetadata':
+        return cls(
+            issuer=_str_or_none(payload.get('issuer')),
+            authorization_endpoint=_str_or_none(payload.get('authorization_endpoint')),
+            token_endpoint=_str_or_none(payload.get('token_endpoint')),
+            introspection_endpoint=_str_or_none(payload.get('introspection_endpoint')),
+            revocation_endpoint=_str_or_none(payload.get('revocation_endpoint')),
+            registration_endpoint=_str_or_none(payload.get('registration_endpoint')),
+            jwks_uri=_str_or_none(payload.get('jwks_uri')),
+            code_challenge_methods_supported=_list_of_strings(payload.get('code_challenge_methods_supported')),
+            grant_types_supported=_list_of_strings(payload.get('grant_types_supported')),
+            response_types_supported=_list_of_strings(payload.get('response_types_supported')),
+            scopes_supported=_list_of_strings(payload.get('scopes_supported')),
+            token_endpoint_auth_methods_supported=_list_of_strings(payload.get('token_endpoint_auth_methods_supported')),
+            introspection_endpoint_auth_methods_supported=_list_of_strings(payload.get('introspection_endpoint_auth_methods_supported')),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        for key, value in {
+            'issuer': self.issuer,
+            'authorization_endpoint': self.authorization_endpoint,
+            'token_endpoint': self.token_endpoint,
+            'introspection_endpoint': self.introspection_endpoint,
+            'revocation_endpoint': self.revocation_endpoint,
+            'registration_endpoint': self.registration_endpoint,
+            'jwks_uri': self.jwks_uri,
+            'code_challenge_methods_supported': self.code_challenge_methods_supported,
+            'grant_types_supported': self.grant_types_supported,
+            'response_types_supported': self.response_types_supported,
+            'scopes_supported': self.scopes_supported,
+            'token_endpoint_auth_methods_supported': self.token_endpoint_auth_methods_supported,
+            'introspection_endpoint_auth_methods_supported': self.introspection_endpoint_auth_methods_supported,
+        }.items():
+            if value is None or value == []:
+                continue
+            payload[key] = value
+        return payload
 
 
 @dataclass(slots=True)
@@ -17,6 +96,9 @@ class Meta:
     ssh_user: str
     install_sh_url: str
     install_ps1_url: str
+    auth_domain: str | None = None
+    oauth_authorization_server: str | None = None
+    oauth_token_verification: str | None = None
 
     @classmethod
     def from_api(cls, payload: dict[str, Any]) -> 'Meta':
@@ -32,10 +114,13 @@ class Meta:
             ssh_user=str(payload['sshUser']),
             install_sh_url=str(payload['installShUrl']),
             install_ps1_url=str(payload['installPs1Url']),
+            auth_domain=_str_or_none(payload.get('authDomain')),
+            oauth_authorization_server=_str_or_none(payload.get('oauthAuthorizationServer')),
+            oauth_token_verification=_str_or_none(payload.get('oauthTokenVerification')),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             'apiVersion': self.api_version,
             'serverVersion': self.server_version,
             'siteDomain': self.site_domain,
@@ -48,6 +133,13 @@ class Meta:
             'installShUrl': self.install_sh_url,
             'installPs1Url': self.install_ps1_url,
         }
+        if self.auth_domain is not None:
+            payload['authDomain'] = self.auth_domain
+        if self.oauth_authorization_server is not None:
+            payload['oauthAuthorizationServer'] = self.oauth_authorization_server
+        if self.oauth_token_verification is not None:
+            payload['oauthTokenVerification'] = self.oauth_token_verification
+        return payload
 
 
 @dataclass(slots=True)
@@ -67,7 +159,7 @@ class KeyCapabilities:
             can_delete=bool(payload['canDelete']),
             min_lifetime_days=int(payload['minLifetimeDays']),
             max_lifetime_days=int(payload['maxLifetimeDays']),
-            default_lifetime_days=payload.get('defaultLifetimeDays'),
+            default_lifetime_days=_int_or_none(payload.get('defaultLifetimeDays')),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -82,6 +174,42 @@ class KeyCapabilities:
 
 
 @dataclass(slots=True)
+class OAuthProxyCapabilities:
+    enabled: bool = False
+    allow_temporary_url: bool | None = None
+    default_client_policy: str | None = None
+    dynamic_client_registration: bool | None = None
+    access_token_ttl_seconds: int | None = None
+    refresh_token_ttl_seconds: int | None = None
+
+    @classmethod
+    def from_api(cls, payload: dict[str, Any] | None) -> 'OAuthProxyCapabilities':
+        payload = payload or {}
+        return cls(
+            enabled=bool(payload.get('enabled', False)),
+            allow_temporary_url=_bool_or_none(payload.get('allowTemporaryUrl')),
+            default_client_policy=_str_or_none(payload.get('defaultClientPolicy')),
+            dynamic_client_registration=_bool_or_none(payload.get('dynamicClientRegistration')),
+            access_token_ttl_seconds=_int_or_none(payload.get('accessTokenTtlSeconds')),
+            refresh_token_ttl_seconds=_int_or_none(payload.get('refreshTokenTtlSeconds')),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {'enabled': self.enabled}
+        if self.allow_temporary_url is not None:
+            payload['allowTemporaryUrl'] = self.allow_temporary_url
+        if self.default_client_policy is not None:
+            payload['defaultClientPolicy'] = self.default_client_policy
+        if self.dynamic_client_registration is not None:
+            payload['dynamicClientRegistration'] = self.dynamic_client_registration
+        if self.access_token_ttl_seconds is not None:
+            payload['accessTokenTtlSeconds'] = self.access_token_ttl_seconds
+        if self.refresh_token_ttl_seconds is not None:
+            payload['refreshTokenTtlSeconds'] = self.refresh_token_ttl_seconds
+        return payload
+
+
+@dataclass(slots=True)
 class DomainCapabilities:
     can_create: bool
     can_delete: bool
@@ -89,6 +217,10 @@ class DomainCapabilities:
     min_lifetime_days: int
     max_lifetime_days: int
     default_lifetime_days: int | None
+    supported_auth_modes: list[str] = field(default_factory=list)
+    supported_connection_modes: list[str] = field(default_factory=list)
+    default_connection_mode: str | None = None
+    oauth_proxy: OAuthProxyCapabilities = field(default_factory=OAuthProxyCapabilities)
 
     @classmethod
     def from_api(cls, payload: dict[str, Any]) -> 'DomainCapabilities':
@@ -98,11 +230,15 @@ class DomainCapabilities:
             supports_random_ephemeral=bool(payload['supportsRandomEphemeral']),
             min_lifetime_days=int(payload['minLifetimeDays']),
             max_lifetime_days=int(payload['maxLifetimeDays']),
-            default_lifetime_days=payload.get('defaultLifetimeDays'),
+            default_lifetime_days=_int_or_none(payload.get('defaultLifetimeDays')),
+            supported_auth_modes=_list_of_strings(payload.get('supportedAuthModes')),
+            supported_connection_modes=_list_of_strings(payload.get('supportedConnectionModes')),
+            default_connection_mode=_str_or_none(payload.get('defaultConnectionMode')),
+            oauth_proxy=OAuthProxyCapabilities.from_api(payload.get('oauthProxy')),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             'canCreate': self.can_create,
             'canDelete': self.can_delete,
             'supportsRandomEphemeral': self.supports_random_ephemeral,
@@ -110,6 +246,15 @@ class DomainCapabilities:
             'maxLifetimeDays': self.max_lifetime_days,
             'defaultLifetimeDays': self.default_lifetime_days,
         }
+        if self.supported_auth_modes:
+            payload['supportedAuthModes'] = self.supported_auth_modes
+        if self.supported_connection_modes:
+            payload['supportedConnectionModes'] = self.supported_connection_modes
+        if self.default_connection_mode is not None:
+            payload['defaultConnectionMode'] = self.default_connection_mode
+        if self.oauth_proxy:
+            payload['oauthProxy'] = self.oauth_proxy.to_dict()
+        return payload
 
 
 @dataclass(slots=True)
@@ -174,10 +319,10 @@ class KeySummary:
             name=str(payload['name']),
             fingerprint=str(payload['fingerprint']),
             created_at=str(payload['createdAt']),
-            expires_at=payload.get('expiresAt'),
-            last_used_at=payload.get('lastUsedAt'),
+            expires_at=_str_or_none(payload.get('expiresAt')),
+            last_used_at=_str_or_none(payload.get('lastUsedAt')),
             status=str(payload['status']),
-            domain_count=(int(payload['domainCount']) if payload.get('domainCount') is not None else None),
+            domain_count=_int_or_none(payload.get('domainCount')),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -211,6 +356,12 @@ class DomainSummary:
     status: str
     key_name: str | None = None
     fingerprint: str | None = None
+    auth_mode: str | None = None
+    stable_url_required: bool | None = None
+    oauth_client_policy: str | None = None
+    connection_mode: str | None = None
+    route_state: str | None = None
+    last_heartbeat_at: str | None = None
 
     @classmethod
     def from_api(cls, payload: dict[str, Any]) -> 'DomainSummary':
@@ -219,16 +370,22 @@ class DomainSummary:
             hostname=str(payload['hostname']),
             fqdn=str(payload['fqdn']),
             public_url=str(payload['publicUrl']),
-            key_id=(int(payload['keyId']) if payload.get('keyId') is not None else None),
+            key_id=_int_or_none(payload.get('keyId')),
             local_port=int(payload['localPort']),
             note=str(payload.get('note', '')),
             created_at=str(payload['createdAt']),
-            expires_at=payload.get('expiresAt'),
-            last_used_at=payload.get('lastUsedAt'),
+            expires_at=_str_or_none(payload.get('expiresAt')),
+            last_used_at=_str_or_none(payload.get('lastUsedAt')),
             mode=str(payload['mode']),
             status=str(payload['status']),
-            key_name=payload.get('keyName'),
-            fingerprint=payload.get('fingerprint'),
+            key_name=_str_or_none(payload.get('keyName')),
+            fingerprint=_str_or_none(payload.get('fingerprint')),
+            auth_mode=_str_or_none(payload.get('authMode')),
+            stable_url_required=_bool_or_none(payload.get('stableUrlRequired')),
+            oauth_client_policy=_str_or_none(payload.get('oauthClientPolicy')),
+            connection_mode=_str_or_none(payload.get('connectionMode')),
+            route_state=_str_or_none(payload.get('routeState')),
+            last_heartbeat_at=_str_or_none(payload.get('lastHeartbeatAt')),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -246,10 +403,18 @@ class DomainSummary:
             'mode': self.mode,
             'status': self.status,
         }
-        if self.key_name is not None:
-            payload['keyName'] = self.key_name
-        if self.fingerprint is not None:
-            payload['fingerprint'] = self.fingerprint
+        for key, value in {
+            'keyName': self.key_name,
+            'fingerprint': self.fingerprint,
+            'authMode': self.auth_mode,
+            'stableUrlRequired': self.stable_url_required,
+            'oauthClientPolicy': self.oauth_client_policy,
+            'connectionMode': self.connection_mode,
+            'routeState': self.route_state,
+            'lastHeartbeatAt': self.last_heartbeat_at,
+        }.items():
+            if value is not None:
+                payload[key] = value
         return payload
 
 
@@ -261,20 +426,34 @@ class SessionSummary:
     delete_on_disconnect: bool
     created_at: str
     completed_at: str | None
+    resume_token: str | None = None
+    route_state: str | None = None
+    last_heartbeat_at: str | None = None
+    auth_mode: str | None = None
+    connection_mode: str | None = None
+    proxy_session_id: str | None = None
+    public_url: str | None = None
 
     @classmethod
     def from_api(cls, payload: dict[str, Any]) -> 'SessionSummary':
         return cls(
             id=str(payload['id']),
-            hostname=str(payload['hostname']),
-            status=str(payload['status']),
-            delete_on_disconnect=bool(payload['deleteOnDisconnect']),
-            created_at=str(payload['createdAt']),
-            completed_at=payload.get('completedAt'),
+            hostname=str(payload.get('hostname', '')),
+            status=str(payload.get('status', 'unknown')),
+            delete_on_disconnect=bool(payload.get('deleteOnDisconnect', False)),
+            created_at=str(payload.get('createdAt', '')),
+            completed_at=_str_or_none(payload.get('completedAt')),
+            resume_token=_str_or_none(payload.get('resumeToken')),
+            route_state=_str_or_none(payload.get('routeState')),
+            last_heartbeat_at=_str_or_none(payload.get('lastHeartbeatAt')),
+            auth_mode=_str_or_none(payload.get('authMode')),
+            connection_mode=_str_or_none(payload.get('connectionMode')),
+            proxy_session_id=_str_or_none(payload.get('proxySessionId')),
+            public_url=_str_or_none(payload.get('publicUrl')),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             'id': self.id,
             'hostname': self.hostname,
             'status': self.status,
@@ -282,6 +461,18 @@ class SessionSummary:
             'createdAt': self.created_at,
             'completedAt': self.completed_at,
         }
+        for key, value in {
+            'resumeToken': self.resume_token,
+            'routeState': self.route_state,
+            'lastHeartbeatAt': self.last_heartbeat_at,
+            'authMode': self.auth_mode,
+            'connectionMode': self.connection_mode,
+            'proxySessionId': self.proxy_session_id,
+            'publicUrl': self.public_url,
+        }.items():
+            if value is not None:
+                payload[key] = value
+        return payload
 
 
 @dataclass(slots=True)
@@ -296,6 +487,14 @@ class ConnectionProfile:
     ssh_command: str
     ssh_args: list[str]
     ssh_config_snippet: str
+    auth_mode: str | None = None
+    connection_mode: str | None = None
+    oauth_client_policy: str | None = None
+    discovery_url: str | None = None
+    authorize_url: str | None = None
+    token_url: str | None = None
+    introspect_url: str | None = None
+    token_verification: str | None = None
 
     @classmethod
     def from_api(cls, payload: dict[str, Any]) -> 'ConnectionProfile':
@@ -310,10 +509,18 @@ class ConnectionProfile:
             ssh_command=str(payload['sshCommand']),
             ssh_args=[str(item) for item in payload.get('sshArgs', [])],
             ssh_config_snippet=str(payload['sshConfigSnippet']),
+            auth_mode=_str_or_none(payload.get('authMode')),
+            connection_mode=_str_or_none(payload.get('connectionMode')),
+            oauth_client_policy=_str_or_none(payload.get('oauthClientPolicy')),
+            discovery_url=_str_or_none(payload.get('discoveryUrl')),
+            authorize_url=_str_or_none(payload.get('authorizeUrl')),
+            token_url=_str_or_none(payload.get('tokenUrl')),
+            introspect_url=_str_or_none(payload.get('introspectUrl')),
+            token_verification=_str_or_none(payload.get('tokenVerification')),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             'sshHost': self.ssh_host,
             'sshPort': self.ssh_port,
             'sshUser': self.ssh_user,
@@ -325,6 +532,19 @@ class ConnectionProfile:
             'sshArgs': self.ssh_args,
             'sshConfigSnippet': self.ssh_config_snippet,
         }
+        for key, value in {
+            'authMode': self.auth_mode,
+            'connectionMode': self.connection_mode,
+            'oauthClientPolicy': self.oauth_client_policy,
+            'discoveryUrl': self.discovery_url,
+            'authorizeUrl': self.authorize_url,
+            'tokenUrl': self.token_url,
+            'introspectUrl': self.introspect_url,
+            'tokenVerification': self.token_verification,
+        }.items():
+            if value is not None:
+                payload[key] = value
+        return payload
 
 
 @dataclass(slots=True)
@@ -348,6 +568,11 @@ class PlanResult:
     connection_profile: ConnectionProfile
     session: SessionSummary | None = None
     saved_profile: SavedProfile | None = None
+    capabilities: Capabilities | None = None
+    discovery: DiscoveryMetadata | None = None
+    session_open_payload: dict[str, Any] | None = None
+    auth: dict[str, Any] | None = None
+    runtime: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -362,6 +587,16 @@ class PlanResult:
                 'args': self.connection_profile.ssh_args,
             },
         }
+        if self.capabilities is not None:
+            payload['capabilities'] = self.capabilities.to_dict()
+        if self.discovery is not None:
+            payload['discovery'] = self.discovery.to_dict()
+        if self.session_open_payload is not None:
+            payload['sessionOpenPayload'] = self.session_open_payload
+        if self.auth is not None:
+            payload['auth'] = self.auth
+        if self.runtime is not None:
+            payload['runtime'] = self.runtime
         if self.session is not None:
             payload['session'] = self.session.to_dict()
         if self.saved_profile is not None:

@@ -12,6 +12,9 @@ class ExitCode(IntEnum):
     AUTH = 3
     API = 4
     CONFLICT = 5
+    OAUTH = 6
+    SESSION = 7
+    HEALTH = 8
 
 
 @dataclass(slots=True)
@@ -74,6 +77,59 @@ class ConflictError(TunnellioError):
         )
 
 
+class OAuthFlowError(TunnellioError):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
+        super().__init__(
+            code='oauth_flow_error',
+            message=message,
+            details=details,
+            exit_code=ExitCode.OAUTH,
+        )
+
+
+class RequestedAuthModeMismatchError(TunnellioError):
+    def __init__(self, requested: str, actual: str, details: dict[str, Any] | None = None):
+        merged = {'requestedAuthMode': requested, 'actualAuthMode': actual}
+        if details:
+            merged.update(details)
+        super().__init__(
+            code='requested_auth_mode_mismatch',
+            message='The server returned a different auth mode than requested.',
+            details=merged,
+            exit_code=ExitCode.VALIDATION,
+        )
+
+
+class SessionError(TunnellioError):
+    def __init__(self, code: str, message: str, details: dict[str, Any] | None = None):
+        super().__init__(
+            code=code,
+            message=message,
+            details=details,
+            exit_code=ExitCode.SESSION,
+        )
+
+
+class SessionResumeError(SessionError):
+    def __init__(self, details: dict[str, Any] | None = None):
+        super().__init__('session_resume_failed', 'Session resume failed.', details)
+
+
+class SessionHeartbeatError(SessionError):
+    def __init__(self, details: dict[str, Any] | None = None):
+        super().__init__('session_heartbeat_failed', 'Session heartbeat failed.', details)
+
+
+class HealthProbeError(TunnellioError):
+    def __init__(self, message: str = 'Health probe failed.', details: dict[str, Any] | None = None):
+        super().__init__(
+            code='health_probe_failed',
+            message=message,
+            details=details,
+            exit_code=ExitCode.HEALTH,
+        )
+
+
 class InteractiveInputRequiredError(TunnellioError):
     def __init__(self, missing: list[str], choices: dict[str, list[str]] | None = None):
         super().__init__(
@@ -101,8 +157,21 @@ def error_from_api(
         'interactive_input_required',
         'key_not_found',
         'domain_not_found',
+        'requested_auth_mode_mismatch',
     }:
+        if code == 'requested_auth_mode_mismatch' and details:
+            return RequestedAuthModeMismatchError(
+                str(details.get('requestedAuthMode')),
+                str(details.get('actualAuthMode')),
+                details,
+            )
         return ValidationError(message, details)
     if code in {'conflict', 'domain_not_available'} or status == 409:
         return ConflictError(message, details)
+    if code.startswith('oauth_'):
+        return OAuthFlowError(message, details)
+    if code.startswith('session_'):
+        return SessionError(code, message, details)
+    if code.startswith('health_'):
+        return HealthProbeError(message, details)
     return TunnellioError(code=code, message=message, details=details, exit_code=ExitCode.API)

@@ -75,6 +75,11 @@ This returns a JSON snapshot containing:
 - launchConfig
 - connection
 - saved status/stop file paths
+- auth contract fields (`authMode`, discovery/token URLs, token verification mode)
+- session/runtime identifiers (`sessionId`, `resumeToken`, `proxySessionId`, runtime name)
+
+The caller should treat the returned auth/runtime contract as authoritative.
+If the caller requested a mode but the server negotiated a different final mode, the returned contract is the truth the caller must follow.
 
 ## Critical random-domain scenario
 When the caller starts a tunnel with a random or ephemeral domain, the client may receive a server-chosen hostname.
@@ -118,6 +123,12 @@ Contains runtime status information, such as:
 - `pid`
 - `publicUrl`
 - `healthUrl`
+- `sessionId`
+- `sessionStatus`
+- `resumeToken`
+- `proxySessionId`
+- `routeState`
+- `lastHeartbeatAt`
 - `runtimeConfigFile`
 - `stopFile`
 - `updatedAt`

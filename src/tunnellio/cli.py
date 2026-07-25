@@ -27,7 +27,7 @@ from .config import (
     save_launch_config,
 )
 from .errors import ExitCode, TunnellioError, ValidationError
-from .models import Capabilities, Meta, PlanResult
+from .models import Capabilities, Meta, PlanResult, SessionSummary
 from .output import OutputWriter
 from .planner import PlanOptions, Planner
 
@@ -67,6 +67,13 @@ SECTION_FIELD_MAPS: dict[str, dict[str, str]] = {
         'local_host': 'localHost',
         'local_port': 'localPort',
         'save_profile': 'saveProfile',
+        'requested_auth_mode': 'requestedAuthMode',
+        'connection_mode': 'connectionMode',
+        'oauth_client_policy': 'oauthClientPolicy',
+        'runtime_name': 'runtimeName',
+        'use_discovery': 'useDiscovery',
+        'session_strategy': 'sessionStrategy',
+        'enable_pkce': 'enablePkce',
     },
     'connect': {
         'output': 'output',
@@ -79,6 +86,13 @@ SECTION_FIELD_MAPS: dict[str, dict[str, str]] = {
         'local_host': 'localHost',
         'local_port': 'localPort',
         'save_profile': 'saveProfile',
+        'requested_auth_mode': 'requestedAuthMode',
+        'connection_mode': 'connectionMode',
+        'oauth_client_policy': 'oauthClientPolicy',
+        'runtime_name': 'runtimeName',
+        'use_discovery': 'useDiscovery',
+        'session_strategy': 'sessionStrategy',
+        'enable_pkce': 'enablePkce',
         'run': 'run',
         'watch': 'watch',
         'name': 'name',
@@ -196,6 +210,13 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument('--local-host', default=None)
         sub.add_argument('--local-port', type=int, default=None)
         sub.add_argument('--save-profile', action=argparse.BooleanOptionalAction, default=None)
+        sub.add_argument('--requested-auth-mode', default=None)
+        sub.add_argument('--connection-mode', default=None)
+        sub.add_argument('--oauth-client-policy', default=None)
+        sub.add_argument('--runtime-name', default=None)
+        sub.add_argument('--use-discovery', action=argparse.BooleanOptionalAction, default=None)
+        sub.add_argument('--session-strategy', default=None)
+        sub.add_argument('--enable-pkce', action=argparse.BooleanOptionalAction, default=None)
         if command_name == 'connect':
             sub.add_argument('--run', action=argparse.BooleanOptionalAction, default=None)
             sub.add_argument('--watch', action=argparse.BooleanOptionalAction, default=None)
@@ -326,8 +347,26 @@ def _write_runtime_connection_snapshot(
         'statusFile': str(status_path),
         'stopFile': str(stop_path),
         'launchConfig': execution_config,
+        'auth': result.auth,
+        'runtime': {
+            **(result.runtime or {}),
+            'name': runtime_name,
+            'statusFile': str(status_path),
+            'stopFile': str(stop_path),
+        },
+        'transport': {
+            'publicUrl': result.connection_profile.public_url,
+            'sshHost': result.connection_profile.ssh_host,
+            'sshPort': result.connection_profile.ssh_port,
+            'sshUser': result.connection_profile.ssh_user,
+            'remoteHostname': result.connection_profile.remote_hostname,
+            'localHost': result.connection_profile.local_host,
+            'localPort': result.connection_profile.local_port,
+        },
         'connection': result.to_dict(),
     }
+    if result.session is not None:
+        payload['session'] = result.session.to_dict()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
 
@@ -353,12 +392,99 @@ def _sleep_with_stop_check(seconds: int, stop_file: Path | None) -> None:
         time.sleep(1)
 
 
-def _complete_ephemeral_session(client: ApiClient, result: PlanResult, logger: RuntimeLogger) -> bool:
-    if result.session is None or not result.session.delete_on_disconnect:
+def _serialize_session(session: SessionSummary | None) -> dict[str, Any]:
+    if session is None:
+        return {}
+    return {
+        'sessionId': session.id,
+        'sessionStatus': session.status,
+        'resumeToken': session.resume_token,
+        'proxySessionId': session.proxy_session_id,
+        'routeState': session.route_state,
+        'lastHeartbeatAt': session.last_heartbeat_at,
+        'authMode': session.auth_mode,
+        'connectionMode': session.connection_mode,
+    }
+
+
+def _complete_ephemeral_session(client: ApiClient, session: SessionSummary | None, logger: RuntimeLogger) -> bool:
+    if session is None or not session.delete_on_disconnect:
         return False
-    logger.log(f'Completing ephemeral session {result.session.id}')
-    client.complete_session(result.session.id)
+    logger.log(f'Completing ephemeral session {session.id}')
+    client.complete_session(session.id)
     return True
+
+
+def _open_runtime_session(
+    client: ApiClient,
+    result: PlanResult,
+    *,
+    logger: RuntimeLogger,
+    runtime_name: str,
+    resume_execution: dict[str, Any] | None = None,
+) -> tuple[SessionSummary | None, str]:
+    if resume_execution:
+        resume_token = resume_execution.get('resumeToken')
+        session_id = resume_execution.get('sessionId')
+        if resume_token or session_id:
+            logger.log('Resuming server-side session')
+            payload = {
+                'runtimeName': runtime_name,
+                'publicUrl': result.connection_profile.public_url,
+            }
+            session_data = client.resume_session(
+                session_id=str(session_id) if session_id else None,
+                resume_token=str(resume_token) if resume_token else None,
+                payload=payload,
+            )
+            return SessionSummary.from_api(session_data), 'resume'
+
+    if result.session_open_payload:
+        logger.log('Opening server-side session')
+        session_data = client.open_session(result.session_open_payload)
+        return SessionSummary.from_api(session_data), 'open'
+
+    if result.session is not None:
+        return result.session, 'launch_spec'
+    return None, 'none'
+
+
+def _heartbeat_runtime_session(
+    client: ApiClient,
+    session: SessionSummary | None,
+    *,
+    runtime_name: str,
+    public_url: str,
+) -> SessionSummary | None:
+    if session is None:
+        return None
+    session_data = client.heartbeat_session(
+        session_id=session.id,
+        resume_token=session.resume_token,
+        payload={
+            'runtimeName': runtime_name,
+            'publicUrl': public_url,
+        },
+    )
+    return SessionSummary.from_api(session_data)
+
+
+def _close_runtime_session(
+    client: ApiClient,
+    session: SessionSummary | None,
+    *,
+    logger: RuntimeLogger,
+    reason: str,
+) -> bool:
+    if session is None:
+        return False
+    try:
+        client.close_session(session_id=session.id, resume_token=session.resume_token, reason=reason)
+        logger.log(f'Closed server-side session {session.id}')
+        return True
+    except Exception as exc:
+        logger.log(f'Failed to close session {session.id}: {exc}')
+        return False
 
 
 def _announce_plan(logger: RuntimeLogger, result: PlanResult, health_url: str) -> None:
@@ -538,6 +664,7 @@ def _run_once(
     health_failures: int,
     status_path: Path,
     stop_file: Path,
+    resume_execution: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if stop_file.exists():
         stop_file.unlink()
@@ -547,6 +674,15 @@ def _run_once(
     health_url = _make_health_url(result.connection_profile.public_url, health_path)
     logger.log(f'Runtime name: {runtime_name}')
     _announce_plan(logger, result, health_url)
+
+    active_session, session_action = _open_runtime_session(
+        client,
+        result,
+        logger=logger,
+        runtime_name=runtime_name,
+        resume_execution=resume_execution,
+    )
+    result.session = active_session
 
     expanded_args = [os.path.expanduser(arg) if '~' in arg else arg for arg in result.connection_profile.ssh_args]
     logger.log('Launching SSH bridge')
@@ -561,11 +697,12 @@ def _run_once(
             'pid': process.pid,
             'publicUrl': result.connection_profile.public_url,
             'healthUrl': health_url,
-            'sessionId': result.session.id if result.session else None,
             'tlsBackend': client.tls_backend,
             'mode': 'connect',
+            'sessionAction': session_action,
             'stopFile': str(stop_file),
             'runtimeConfigFile': str(runtime_config_path),
+            **_serialize_session(active_session),
         },
     )
 
@@ -576,6 +713,7 @@ def _run_once(
     reason = 'process_exit'
     return_code: int | None = None
     session_completed = False
+    session_closed = False
 
     try:
         while True:
@@ -596,6 +734,36 @@ def _run_once(
                 verbose=logger.verbose,
             )
             if ok:
+                if active_session is not None:
+                    try:
+                        active_session = _heartbeat_runtime_session(
+                            client,
+                            active_session,
+                            runtime_name=runtime_name,
+                            public_url=result.connection_profile.public_url,
+                        )
+                        result.session = active_session
+                    except Exception as exc:
+                        reason = 'session_heartbeat_failed'
+                        logger.log(f'Session heartbeat failed: {exc}')
+                        _write_status(
+                            status_path,
+                            {
+                                'name': runtime_name,
+                                'state': 'degraded',
+                                'pid': process.pid,
+                                'publicUrl': result.connection_profile.public_url,
+                                'healthUrl': health_url,
+                                'tlsBackend': tls_backend,
+                                'healthy': False,
+                                'detail': str(exc),
+                                'reason': reason,
+                                'stopFile': str(stop_file),
+                                'runtimeConfigFile': str(runtime_config_path),
+                                **_serialize_session(active_session),
+                            },
+                        )
+                        raise TunnelUnhealthy()
                 if not healthy_once or consecutive_failures > 0:
                     logger.log(f'Health OK via {tls_backend}: {detail}')
                 healthy_once = True
@@ -608,12 +776,13 @@ def _run_once(
                         'pid': process.pid,
                         'publicUrl': result.connection_profile.public_url,
                         'healthUrl': health_url,
-                        'sessionId': result.session.id if result.session else None,
                         'tlsBackend': tls_backend,
                         'healthy': True,
                         'detail': detail,
+                        'sessionAction': session_action,
                         'stopFile': str(stop_file),
                         'runtimeConfigFile': str(runtime_config_path),
+                        **_serialize_session(active_session),
                     },
                 )
             else:
@@ -627,13 +796,13 @@ def _run_once(
                         'pid': process.pid,
                         'publicUrl': result.connection_profile.public_url,
                         'healthUrl': health_url,
-                        'sessionId': result.session.id if result.session else None,
                         'tlsBackend': tls_backend,
                         'healthy': False,
                         'detail': detail,
                         'consecutiveFailures': consecutive_failures,
                         'stopFile': str(stop_file),
                         'runtimeConfigFile': str(runtime_config_path),
+                        **_serialize_session(active_session),
                     },
                 )
                 if consecutive_failures >= health_failures:
@@ -664,7 +833,8 @@ def _run_once(
                 process.kill()
                 process.wait(timeout=10)
         return_code = process.returncode
-        session_completed = _complete_ephemeral_session(client, result, logger)
+        session_closed = _close_runtime_session(client, active_session, logger=logger, reason=reason)
+        session_completed = _complete_ephemeral_session(client, active_session, logger)
         _write_status(
             status_path,
             {
@@ -673,13 +843,15 @@ def _run_once(
                 'pid': process.pid,
                 'publicUrl': result.connection_profile.public_url,
                 'healthUrl': health_url,
-                'sessionId': result.session.id if result.session else None,
                 'healthyOnce': healthy_once,
                 'reason': reason,
                 'returnCode': return_code,
+                'sessionAction': session_action,
+                'sessionClosed': session_closed,
                 'sessionCompleted': session_completed,
                 'stopFile': str(stop_file),
                 'runtimeConfigFile': str(runtime_config_path),
+                **_serialize_session(active_session),
             },
         )
 
@@ -688,7 +860,8 @@ def _run_once(
         'returnCode': return_code,
         'interrupted': interrupted,
         'stopRequested': stop_requested,
-        'sessionId': result.session.id if result.session else None,
+        'sessionAction': session_action,
+        'sessionClosed': session_closed,
         'sessionCompleted': session_completed,
         'healthyOnce': healthy_once,
         'reason': reason,
@@ -696,6 +869,7 @@ def _run_once(
         'statusFile': str(status_path),
         'stopFile': str(stop_file),
         'runtimeConfigFile': str(runtime_config_path),
+        **_serialize_session(active_session),
     }
 
 
@@ -734,20 +908,41 @@ def _run_watch_loop(
 
         logger.log(f'Preparing launch plan (attempt {restart_count + 1})')
         result = planner.build_plan(options)
-        execution = _run_once(
-            client,
-            result,
-            logger=logger,
-            insecure_tls=insecure_tls,
-            runtime_name=runtime_name,
-            runtime_config_path=runtime_config_path,
-            health_path=health_path,
-            health_interval=health_interval,
-            health_timeout=health_timeout,
-            health_failures=health_failures,
-            status_path=status_path,
-            stop_file=stop_file,
-        )
+        try:
+            execution = _run_once(
+                client,
+                result,
+                logger=logger,
+                insecure_tls=insecure_tls,
+                runtime_name=runtime_name,
+                runtime_config_path=runtime_config_path,
+                health_path=health_path,
+                health_interval=health_interval,
+                health_timeout=health_timeout,
+                health_failures=health_failures,
+                status_path=status_path,
+                stop_file=stop_file,
+                resume_execution=last_execution,
+            )
+        except TunnellioError as exc:
+            restart_count += 1
+            logger.log(f'Launch failed: {exc}')
+            _write_status(
+                status_path,
+                {
+                    'name': runtime_name,
+                    'state': 'restarting',
+                    'restartCount': restart_count,
+                    'reason': getattr(exc, 'code', 'launch_error'),
+                    'error': exc.to_payload().get('error'),
+                    'stopFile': str(stop_file),
+                    'runtimeConfigFile': str(runtime_config_path),
+                },
+            )
+            if max_restarts and restart_count > max_restarts:
+                raise
+            _sleep_with_stop_check(restart_delay, stop_file)
+            continue
         last_result = result
         last_execution = execution
 
@@ -766,6 +961,7 @@ def _run_watch_loop(
                 'publicUrl': result.connection_profile.public_url,
                 'stopFile': str(stop_file),
                 'runtimeConfigFile': str(runtime_config_path),
+                **_serialize_session(result.session),
             },
         )
         _sleep_with_stop_check(restart_delay, stop_file)
@@ -870,12 +1066,19 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
         note=settings.get('note'),
         save_profile=bool(settings.get('saveProfile')),
         mode=command,
+        requested_auth_mode=settings.get('requestedAuthMode'),
+        connection_mode=settings.get('connectionMode'),
+        oauth_client_policy=settings.get('oauthClientPolicy'),
+        runtime_name=settings.get('runtimeName') or settings.get('name'),
+        use_discovery=bool(settings.get('useDiscovery', True)),
+        session_strategy=settings.get('sessionStrategy'),
+        enable_pkce=bool(settings.get('enablePkce')),
     )
     log_progress(verbose, f'Building {command} plan')
     result = planner.build_plan(options)
 
     if command == 'connect' and settings.get('run'):
-        runtime_name = str(settings.get('name') or _generate_runtime_name(settings.get('domainSelector'), settings.get('localPort')))
+        runtime_name = str(settings.get('runtimeName') or settings.get('name') or _generate_runtime_name(settings.get('domainSelector'), settings.get('localPort')))
         status_path_default, stop_path_default, runtime_config_path_default = _default_runtime_paths(runtime.runtime_dir, runtime_name)
         status_path = _expand_optional_path(settings.get('statusFile')) or status_path_default
         stop_file = _expand_optional_path(settings.get('stopFile')) or stop_path_default
