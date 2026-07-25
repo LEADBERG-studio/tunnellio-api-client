@@ -82,6 +82,46 @@
     "name": "prod-api",
     "pid": null
   },
+  "oauthLogin": {
+    "output": "json",
+    "domainSelector": "existing:test",
+    "clientId": "YOUR_OAUTH_CLIENT_ID",
+    "clientSecret": null,
+    "redirectUri": "http://localhost:3333/callback",
+    "scopes": "proxy.connect proxy.inspect",
+    "discoveryUrl": "https://api.tunnellio.ru/.well-known/oauth-authorization-server",
+    "authorizeUrl": null,
+    "tokenUrl": null,
+    "introspectUrl": null,
+    "tokenName": "test-client-token",
+    "tokenFile": null,
+    "saveToken": true,
+    "useDiscovery": true,
+    "enablePkce": true
+  },
+  "oauthRefresh": {
+    "output": "json",
+    "tokenName": "test-client-token",
+    "tokenFile": null,
+    "clientId": null,
+    "clientSecret": null,
+    "discoveryUrl": null,
+    "tokenUrl": null,
+    "introspectUrl": null,
+    "saveToken": true,
+    "useDiscovery": true
+  },
+  "oauthIntrospect": {
+    "output": "json",
+    "tokenName": "test-client-token",
+    "tokenFile": null,
+    "accessToken": null,
+    "clientId": null,
+    "clientSecret": null,
+    "discoveryUrl": null,
+    "introspectUrl": null,
+    "useDiscovery": true
+  },
   "paths": {
     "defaultConfig": "~/.tunnellio/default-launch.json",
     "clientConfigsDir": "~/.tunnellio/configs",

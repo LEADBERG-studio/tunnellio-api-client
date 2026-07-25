@@ -5,7 +5,7 @@ project_root = Path.cwd()
 block_cipher = None
 
 a = Analysis(
-    ['src/tunnellio/cli.py'],
+    ['src/tunnellio/__main__.py'],
     pathex=[str(project_root / 'src')],
     binaries=[],
     datas=[],

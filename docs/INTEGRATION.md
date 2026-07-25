@@ -75,7 +75,7 @@ This returns a JSON snapshot containing:
 - launchConfig
 - connection
 - saved status/stop file paths
-- auth contract fields (`authMode`, discovery/token URLs, token verification mode)
+- auth contract fields (`authMode`, discovery URL, protected-resource metadata URL, token/authorize/introspection URLs, token verification mode, supported scopes, supported bearer methods)
 - session/runtime identifiers (`sessionId`, `resumeToken`, `proxySessionId`, runtime name)
 
 The caller should treat the returned auth/runtime contract as authoritative.

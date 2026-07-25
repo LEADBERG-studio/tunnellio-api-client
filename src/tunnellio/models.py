@@ -35,12 +35,14 @@ class DiscoveryMetadata:
     revocation_endpoint: str | None = None
     registration_endpoint: str | None = None
     jwks_uri: str | None = None
+    service_documentation: str | None = None
     code_challenge_methods_supported: list[str] = field(default_factory=list)
     grant_types_supported: list[str] = field(default_factory=list)
     response_types_supported: list[str] = field(default_factory=list)
     scopes_supported: list[str] = field(default_factory=list)
     token_endpoint_auth_methods_supported: list[str] = field(default_factory=list)
     introspection_endpoint_auth_methods_supported: list[str] = field(default_factory=list)
+    token_verification_methods_supported: list[str] = field(default_factory=list)
 
     @classmethod
     def from_api(cls, payload: dict[str, Any]) -> 'DiscoveryMetadata':
@@ -52,12 +54,14 @@ class DiscoveryMetadata:
             revocation_endpoint=_str_or_none(payload.get('revocation_endpoint')),
             registration_endpoint=_str_or_none(payload.get('registration_endpoint')),
             jwks_uri=_str_or_none(payload.get('jwks_uri')),
+            service_documentation=_str_or_none(payload.get('service_documentation')),
             code_challenge_methods_supported=_list_of_strings(payload.get('code_challenge_methods_supported')),
             grant_types_supported=_list_of_strings(payload.get('grant_types_supported')),
             response_types_supported=_list_of_strings(payload.get('response_types_supported')),
             scopes_supported=_list_of_strings(payload.get('scopes_supported')),
             token_endpoint_auth_methods_supported=_list_of_strings(payload.get('token_endpoint_auth_methods_supported')),
             introspection_endpoint_auth_methods_supported=_list_of_strings(payload.get('introspection_endpoint_auth_methods_supported')),
+            token_verification_methods_supported=_list_of_strings(payload.get('token_verification_methods_supported')),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -70,12 +74,47 @@ class DiscoveryMetadata:
             'revocation_endpoint': self.revocation_endpoint,
             'registration_endpoint': self.registration_endpoint,
             'jwks_uri': self.jwks_uri,
+            'service_documentation': self.service_documentation,
             'code_challenge_methods_supported': self.code_challenge_methods_supported,
             'grant_types_supported': self.grant_types_supported,
             'response_types_supported': self.response_types_supported,
             'scopes_supported': self.scopes_supported,
             'token_endpoint_auth_methods_supported': self.token_endpoint_auth_methods_supported,
             'introspection_endpoint_auth_methods_supported': self.introspection_endpoint_auth_methods_supported,
+            'token_verification_methods_supported': self.token_verification_methods_supported,
+        }.items():
+            if value is None or value == []:
+                continue
+            payload[key] = value
+        return payload
+
+
+@dataclass(slots=True)
+class ProtectedResourceMetadata:
+    resource: str | None = None
+    authorization_servers: list[str] = field(default_factory=list)
+    scopes_supported: list[str] = field(default_factory=list)
+    bearer_methods_supported: list[str] = field(default_factory=list)
+    resource_documentation: str | None = None
+
+    @classmethod
+    def from_api(cls, payload: dict[str, Any]) -> 'ProtectedResourceMetadata':
+        return cls(
+            resource=_str_or_none(payload.get('resource')),
+            authorization_servers=_list_of_strings(payload.get('authorization_servers')),
+            scopes_supported=_list_of_strings(payload.get('scopes_supported')),
+            bearer_methods_supported=_list_of_strings(payload.get('bearer_methods_supported')),
+            resource_documentation=_str_or_none(payload.get('resource_documentation')),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        for key, value in {
+            'resource': self.resource,
+            'authorization_servers': self.authorization_servers,
+            'scopes_supported': self.scopes_supported,
+            'bearer_methods_supported': self.bearer_methods_supported,
+            'resource_documentation': self.resource_documentation,
         }.items():
             if value is None or value == []:
                 continue
@@ -97,7 +136,11 @@ class Meta:
     install_sh_url: str
     install_ps1_url: str
     auth_domain: str | None = None
+    auth_base_url: str | None = None
+    default_connection_mode: str | None = None
     oauth_authorization_server: str | None = None
+    oauth_issuer: str | None = None
+    oauth_proxy_enabled: bool | None = None
     oauth_token_verification: str | None = None
 
     @classmethod
@@ -115,7 +158,11 @@ class Meta:
             install_sh_url=str(payload['installShUrl']),
             install_ps1_url=str(payload['installPs1Url']),
             auth_domain=_str_or_none(payload.get('authDomain')),
+            auth_base_url=_str_or_none(payload.get('authBaseUrl')),
+            default_connection_mode=_str_or_none(payload.get('defaultConnectionMode')),
             oauth_authorization_server=_str_or_none(payload.get('oauthAuthorizationServer')),
+            oauth_issuer=_str_or_none(payload.get('oauthIssuer')),
+            oauth_proxy_enabled=_bool_or_none(payload.get('oauthProxyEnabled')),
             oauth_token_verification=_str_or_none(payload.get('oauthTokenVerification')),
         )
 
@@ -135,8 +182,16 @@ class Meta:
         }
         if self.auth_domain is not None:
             payload['authDomain'] = self.auth_domain
+        if self.auth_base_url is not None:
+            payload['authBaseUrl'] = self.auth_base_url
+        if self.default_connection_mode is not None:
+            payload['defaultConnectionMode'] = self.default_connection_mode
         if self.oauth_authorization_server is not None:
             payload['oauthAuthorizationServer'] = self.oauth_authorization_server
+        if self.oauth_issuer is not None:
+            payload['oauthIssuer'] = self.oauth_issuer
+        if self.oauth_proxy_enabled is not None:
+            payload['oauthProxyEnabled'] = self.oauth_proxy_enabled
         if self.oauth_token_verification is not None:
             payload['oauthTokenVerification'] = self.oauth_token_verification
         return payload
@@ -177,10 +232,15 @@ class KeyCapabilities:
 class OAuthProxyCapabilities:
     enabled: bool = False
     allow_temporary_url: bool | None = None
+    auth_base_url: str | None = None
+    auth_domain: str | None = None
     default_client_policy: str | None = None
+    discovery_url: str | None = None
     dynamic_client_registration: bool | None = None
+    issuer: str | None = None
     access_token_ttl_seconds: int | None = None
     refresh_token_ttl_seconds: int | None = None
+    token_verification: str | None = None
 
     @classmethod
     def from_api(cls, payload: dict[str, Any] | None) -> 'OAuthProxyCapabilities':
@@ -188,24 +248,39 @@ class OAuthProxyCapabilities:
         return cls(
             enabled=bool(payload.get('enabled', False)),
             allow_temporary_url=_bool_or_none(payload.get('allowTemporaryUrl')),
+            auth_base_url=_str_or_none(payload.get('authBaseUrl')),
+            auth_domain=_str_or_none(payload.get('authDomain')),
             default_client_policy=_str_or_none(payload.get('defaultClientPolicy')),
+            discovery_url=_str_or_none(payload.get('discoveryUrl')),
             dynamic_client_registration=_bool_or_none(payload.get('dynamicClientRegistration')),
+            issuer=_str_or_none(payload.get('issuer')),
             access_token_ttl_seconds=_int_or_none(payload.get('accessTokenTtlSeconds')),
             refresh_token_ttl_seconds=_int_or_none(payload.get('refreshTokenTtlSeconds')),
+            token_verification=_str_or_none(payload.get('tokenVerification')),
         )
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {'enabled': self.enabled}
         if self.allow_temporary_url is not None:
             payload['allowTemporaryUrl'] = self.allow_temporary_url
+        if self.auth_base_url is not None:
+            payload['authBaseUrl'] = self.auth_base_url
+        if self.auth_domain is not None:
+            payload['authDomain'] = self.auth_domain
         if self.default_client_policy is not None:
             payload['defaultClientPolicy'] = self.default_client_policy
+        if self.discovery_url is not None:
+            payload['discoveryUrl'] = self.discovery_url
         if self.dynamic_client_registration is not None:
             payload['dynamicClientRegistration'] = self.dynamic_client_registration
+        if self.issuer is not None:
+            payload['issuer'] = self.issuer
         if self.access_token_ttl_seconds is not None:
             payload['accessTokenTtlSeconds'] = self.access_token_ttl_seconds
         if self.refresh_token_ttl_seconds is not None:
             payload['refreshTokenTtlSeconds'] = self.refresh_token_ttl_seconds
+        if self.token_verification is not None:
+            payload['tokenVerification'] = self.token_verification
         return payload
 
 
@@ -284,6 +359,7 @@ class Capabilities:
     keys: KeyCapabilities
     domains: DomainCapabilities
     ephemeral: EphemeralCapabilities
+    oauth_proxy: OAuthProxyCapabilities = field(default_factory=OAuthProxyCapabilities)
 
     @classmethod
     def from_api(cls, payload: dict[str, Any]) -> 'Capabilities':
@@ -291,14 +367,18 @@ class Capabilities:
             keys=KeyCapabilities.from_api(payload['keys']),
             domains=DomainCapabilities.from_api(payload['domains']),
             ephemeral=EphemeralCapabilities.from_api(payload['ephemeral']),
+            oauth_proxy=OAuthProxyCapabilities.from_api(payload.get('oauthProxy')),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             'keys': self.keys.to_dict(),
             'domains': self.domains.to_dict(),
             'ephemeral': self.ephemeral.to_dict(),
         }
+        if self.oauth_proxy:
+            payload['oauthProxy'] = self.oauth_proxy.to_dict()
+        return payload
 
 
 @dataclass(slots=True)
@@ -570,6 +650,7 @@ class PlanResult:
     saved_profile: SavedProfile | None = None
     capabilities: Capabilities | None = None
     discovery: DiscoveryMetadata | None = None
+    protected_resource: ProtectedResourceMetadata | None = None
     session_open_payload: dict[str, Any] | None = None
     auth: dict[str, Any] | None = None
     runtime: dict[str, Any] | None = None
@@ -591,6 +672,8 @@ class PlanResult:
             payload['capabilities'] = self.capabilities.to_dict()
         if self.discovery is not None:
             payload['discovery'] = self.discovery.to_dict()
+        if self.protected_resource is not None:
+            payload['protectedResource'] = self.protected_resource.to_dict()
         if self.session_open_payload is not None:
             payload['sessionOpenPayload'] = self.session_open_payload
         if self.auth is not None:

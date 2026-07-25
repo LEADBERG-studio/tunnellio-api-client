@@ -137,6 +137,19 @@ class DummyClient:
             'token_endpoint': 'https://auth.example.com/token',
             'introspection_endpoint': 'https://auth.example.com/introspect',
             'code_challenge_methods_supported': ['S256'],
+            'scopes_supported': ['mcp.read', 'mcp.write'],
+            'token_endpoint_auth_methods_supported': ['none'],
+            'introspection_endpoint_auth_methods_supported': ['client_secret_post'],
+        }
+
+    def fetch_oauth_protected_resource(self, **kwargs):
+        if kwargs.get('resource_metadata_url') == 'https://demo.tunnellio.site/.well-known/oauth-protected-resource':
+            return {}
+        return {
+            'resource': 'https://auth.example.com',
+            'authorization_servers': ['https://auth.example.com'],
+            'scopes_supported': ['mcp.read', 'mcp.write'],
+            'bearer_methods_supported': ['header'],
         }
 
 
@@ -215,7 +228,13 @@ def test_build_plan_returns_session_and_auth_contracts() -> None:
     payload = result.to_dict()
     assert payload['session']['resumeToken'] == 'resume_123'
     assert payload['auth']['tokenVerification'] == 'introspection'
+    assert payload['auth']['protectedResourceMetadataUrl'] == 'https://auth.example.com/.well-known/oauth-protected-resource'
+    assert payload['auth']['authorizationServers'] == ['https://auth.example.com']
+    assert payload['auth']['scopesSupported'] == ['mcp.read', 'mcp.write']
+    assert payload['auth']['tokenEndpointAuthMethodsSupported'] == ['none']
+    assert payload['auth']['bearerMethodsSupported'] == ['header']
     assert payload['runtime']['name'] == 'prod-api'
+    assert payload['protectedResource']['resource'] == 'https://auth.example.com'
     assert payload['sessionOpenPayload']['enablePkce'] is True
 
 

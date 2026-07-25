@@ -9,7 +9,7 @@ from typing import Any, Callable
 from urllib import error, parse, request
 
 from .config import RuntimeConfig
-from .discovery import build_discovery_url
+from .discovery import build_discovery_url, build_protected_resource_metadata_url
 from .errors import ApiError, error_from_api
 
 
@@ -178,6 +178,30 @@ class ApiClient:
             raise ApiError('Discovery URL could not be resolved.')
         return self._request_json(method='GET', url=resolved_url, include_auth=False, expect_envelope=False)
 
+    def fetch_oauth_protected_resource(
+        self,
+        *,
+        resource_metadata_url: str | None = None,
+        resource_url: str | None = None,
+    ) -> dict[str, Any]:
+        resolved_url = build_protected_resource_metadata_url(
+            resource_url=resource_url,
+            explicit_url=resource_metadata_url,
+        )
+        if not resolved_url:
+            raise ApiError('Protected resource metadata URL could not be resolved.')
+        return self._request_json(method='GET', url=resolved_url, include_auth=False, expect_envelope=False)
+
+    @staticmethod
+    def _unwrap_oauth_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        if payload.get('ok') is True and isinstance(payload.get('data'), dict):
+            return payload['data']
+        return payload
+
+    def authorize_oauth_code(self, *, authorize_url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        raw_payload = self._request_json(method='POST', url=authorize_url, payload=payload, include_auth=False, expect_envelope=False)
+        return self._unwrap_oauth_payload(raw_payload)
+
     def list_keys(self) -> list[dict[str, Any]]:
         return self._request_json(method='POST', path='/v1/keys/list', payload={}).get('keys', [])
 
@@ -288,7 +312,8 @@ class ApiClient:
         return self._request_json(method='POST', path='/v1/launch-spec', payload=payload)
 
     def exchange_oauth_token(self, *, token_url: str, form_payload: dict[str, Any]) -> dict[str, Any]:
-        return self._request_json(method='POST', url=token_url, form=form_payload, include_auth=False, expect_envelope=False)
+        raw_payload = self._request_json(method='POST', url=token_url, form=form_payload, include_auth=False, expect_envelope=False)
+        return self._unwrap_oauth_payload(raw_payload)
 
     def introspect_oauth_token(
         self,
@@ -305,4 +330,5 @@ class ApiClient:
             'client_secret': client_secret,
             'token_type_hint': token_type_hint,
         }
-        return self._request_json(method='POST', url=introspect_url, form=form_payload, include_auth=False, expect_envelope=False)
+        raw_payload = self._request_json(method='POST', url=introspect_url, form=form_payload, include_auth=False, expect_envelope=False)
+        return self._unwrap_oauth_payload(raw_payload)

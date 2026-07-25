@@ -7,13 +7,14 @@ from typing import Any
 
 from .client import ApiClient
 from .config import RuntimeConfig
-from .discovery import build_discovery_url
+from .discovery import build_discovery_url, build_protected_resource_metadata_url
 from .errors import ApiError, InteractiveInputRequiredError, RequestedAuthModeMismatchError, ValidationError
 from .models import (
     Capabilities,
     ConnectionProfile,
     DiscoveryMetadata,
     DomainSummary,
+    ProtectedResourceMetadata,
     KeySummary,
     Meta,
     PlanResult,
@@ -59,8 +60,9 @@ class Planner:
         connection_profile = ConnectionProfile.from_api(data['connectionProfile'])
         session = SessionSummary.from_api(data['session']) if data.get('session') else None
         discovery = self._load_discovery(meta, connection_profile, options)
+        protected_resource = self._load_protected_resource(meta, connection_profile)
         session_open_payload = self.build_session_open_payload(options, key, domain, connection_profile, session)
-        auth_contract = self.build_auth_contract(meta, connection_profile, session, discovery)
+        auth_contract = self.build_auth_contract(meta, connection_profile, session, discovery, protected_resource)
         runtime_contract = self.build_runtime_contract(options, connection_profile, session)
         self._validate_requested_auth_mode(options, auth_contract, domain)
 
@@ -78,6 +80,7 @@ class Planner:
             saved_profile=saved_profile,
             capabilities=capabilities,
             discovery=discovery,
+            protected_resource=protected_resource,
             session_open_payload=session_open_payload,
             auth=auth_contract,
             runtime=runtime_contract,
@@ -203,17 +206,29 @@ class Planner:
         connection_profile: ConnectionProfile,
         session: SessionSummary | None,
         discovery: DiscoveryMetadata | None,
+        protected_resource: ProtectedResourceMetadata | None,
     ) -> dict[str, Any]:
+        discovery_url = connection_profile.discovery_url or meta.oauth_authorization_server or build_discovery_url(auth_domain=meta.auth_domain)
+        resource_url = protected_resource.resource if protected_resource and protected_resource.resource else connection_profile.public_url
+        protected_resource_metadata_url = build_protected_resource_metadata_url(resource_url=resource_url)
         return {
             'authMode': connection_profile.auth_mode or (session.auth_mode if session else None),
             'connectionMode': connection_profile.connection_mode or (session.connection_mode if session else None),
             'authDomain': meta.auth_domain,
-            'discoveryUrl': connection_profile.discovery_url or meta.oauth_authorization_server or build_discovery_url(auth_domain=meta.auth_domain),
+            'discoveryUrl': discovery_url,
+            'protectedResourceMetadataUrl': protected_resource_metadata_url,
+            'resource': (protected_resource.resource if protected_resource and protected_resource.resource else connection_profile.public_url),
+            'authorizationServers': protected_resource.authorization_servers if protected_resource else [],
             'authorizeUrl': connection_profile.authorize_url or (discovery.authorization_endpoint if discovery else None),
             'tokenUrl': connection_profile.token_url or (discovery.token_endpoint if discovery else None),
             'introspectUrl': connection_profile.introspect_url or (discovery.introspection_endpoint if discovery else None),
             'tokenVerification': connection_profile.token_verification or meta.oauth_token_verification,
             'oauthClientPolicy': connection_profile.oauth_client_policy,
+            'scopesSupported': (protected_resource.scopes_supported if protected_resource and protected_resource.scopes_supported else (discovery.scopes_supported if discovery else [])),
+            'codeChallengeMethodsSupported': discovery.code_challenge_methods_supported if discovery else [],
+            'tokenEndpointAuthMethodsSupported': discovery.token_endpoint_auth_methods_supported if discovery else [],
+            'introspectionEndpointAuthMethodsSupported': discovery.introspection_endpoint_auth_methods_supported if discovery else [],
+            'bearerMethodsSupported': protected_resource.bearer_methods_supported if protected_resource else [],
         }
 
     def build_runtime_contract(
@@ -276,6 +291,21 @@ class Planner:
         except ApiError:
             return None
         return DiscoveryMetadata.from_api(payload)
+
+    def _load_protected_resource(self, meta: Meta, connection_profile: ConnectionProfile) -> ProtectedResourceMetadata | None:
+        candidates = [connection_profile.public_url, meta.auth_base_url, meta.api_base_url]
+        for candidate in candidates:
+            resource_metadata_url = build_protected_resource_metadata_url(resource_url=candidate)
+            if not resource_metadata_url:
+                continue
+            try:
+                payload = self._client.fetch_oauth_protected_resource(resource_metadata_url=resource_metadata_url)
+            except ApiError:
+                continue
+            metadata = ProtectedResourceMetadata.from_api(payload)
+            if metadata.resource or metadata.authorization_servers or metadata.scopes_supported or metadata.bearer_methods_supported:
+                return metadata
+        return None
 
     def _build_key_payload(
         self,

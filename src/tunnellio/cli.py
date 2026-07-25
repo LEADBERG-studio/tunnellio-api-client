@@ -27,9 +27,10 @@ from .config import (
     save_launch_config,
 )
 from .errors import ExitCode, TunnellioError, ValidationError
-from .models import Capabilities, Meta, PlanResult, SessionSummary
+from .models import Capabilities, DiscoveryMetadata, Meta, PlanResult, SessionSummary
+from .oauth import OAuthTokenRecord, build_token_storage_name, generate_pkce_pair, load_token_record, save_token_record
 from .output import OutputWriter
-from .planner import PlanOptions, Planner
+from .planner import PlanOptions, Planner, _split_selector
 
 COMMAND_TO_SECTION = {
     'meta': 'meta',
@@ -39,6 +40,9 @@ COMMAND_TO_SECTION = {
     'status': 'status',
     'stop': 'stop',
     'show-config': 'showConfig',
+    'oauth-login': 'oauthLogin',
+    'oauth-refresh': 'oauthRefresh',
+    'oauth-introspect': 'oauthIntrospect',
 }
 
 GLOBAL_FIELD_MAP = {
@@ -124,6 +128,46 @@ SECTION_FIELD_MAPS: dict[str, dict[str, str]] = {
         'name': 'name',
         'pid': 'pid',
     },
+    'oauth-login': {
+        'output': 'output',
+        'domain_selector': 'domainSelector',
+        'client_id': 'clientId',
+        'client_secret': 'clientSecret',
+        'redirect_uri': 'redirectUri',
+        'scopes': 'scopes',
+        'discovery_url': 'discoveryUrl',
+        'authorize_url': 'authorizeUrl',
+        'token_url': 'tokenUrl',
+        'introspect_url': 'introspectUrl',
+        'token_name': 'tokenName',
+        'token_file': 'tokenFile',
+        'save_token': 'saveToken',
+        'use_discovery': 'useDiscovery',
+        'enable_pkce': 'enablePkce',
+    },
+    'oauth-refresh': {
+        'output': 'output',
+        'token_name': 'tokenName',
+        'token_file': 'tokenFile',
+        'client_id': 'clientId',
+        'client_secret': 'clientSecret',
+        'discovery_url': 'discoveryUrl',
+        'token_url': 'tokenUrl',
+        'introspect_url': 'introspectUrl',
+        'use_discovery': 'useDiscovery',
+        'save_token': 'saveToken',
+    },
+    'oauth-introspect': {
+        'output': 'output',
+        'token_name': 'tokenName',
+        'token_file': 'tokenFile',
+        'access_token': 'accessToken',
+        'client_id': 'clientId',
+        'client_secret': 'clientSecret',
+        'discovery_url': 'discoveryUrl',
+        'introspect_url': 'introspectUrl',
+        'use_discovery': 'useDiscovery',
+    },
 }
 
 
@@ -197,6 +241,46 @@ def build_parser() -> argparse.ArgumentParser:
     runtime_config_parser.add_argument('--output', choices=['json', 'text'], default=None)
     runtime_config_parser.add_argument('--name', default=None)
     runtime_config_parser.add_argument('--pid', type=int, default=None)
+
+    oauth_login_parser = subparsers.add_parser('oauth-login')
+    oauth_login_parser.add_argument('--output', choices=['json', 'text'], default=None)
+    oauth_login_parser.add_argument('--domain', dest='domain_selector', default=None)
+    oauth_login_parser.add_argument('--client-id', default=None)
+    oauth_login_parser.add_argument('--client-secret', default=None)
+    oauth_login_parser.add_argument('--redirect-uri', default=None)
+    oauth_login_parser.add_argument('--scopes', default=None)
+    oauth_login_parser.add_argument('--discovery-url', default=None)
+    oauth_login_parser.add_argument('--authorize-url', default=None)
+    oauth_login_parser.add_argument('--token-url', default=None)
+    oauth_login_parser.add_argument('--introspect-url', default=None)
+    oauth_login_parser.add_argument('--token-name', default=None)
+    oauth_login_parser.add_argument('--token-file', default=None)
+    oauth_login_parser.add_argument('--save-token', action=argparse.BooleanOptionalAction, default=None)
+    oauth_login_parser.add_argument('--use-discovery', action=argparse.BooleanOptionalAction, default=None)
+    oauth_login_parser.add_argument('--enable-pkce', action=argparse.BooleanOptionalAction, default=None)
+
+    oauth_refresh_parser = subparsers.add_parser('oauth-refresh')
+    oauth_refresh_parser.add_argument('--output', choices=['json', 'text'], default=None)
+    oauth_refresh_parser.add_argument('--token-name', default=None)
+    oauth_refresh_parser.add_argument('--token-file', default=None)
+    oauth_refresh_parser.add_argument('--client-id', default=None)
+    oauth_refresh_parser.add_argument('--client-secret', default=None)
+    oauth_refresh_parser.add_argument('--discovery-url', default=None)
+    oauth_refresh_parser.add_argument('--token-url', default=None)
+    oauth_refresh_parser.add_argument('--introspect-url', default=None)
+    oauth_refresh_parser.add_argument('--save-token', action=argparse.BooleanOptionalAction, default=None)
+    oauth_refresh_parser.add_argument('--use-discovery', action=argparse.BooleanOptionalAction, default=None)
+
+    oauth_introspect_parser = subparsers.add_parser('oauth-introspect')
+    oauth_introspect_parser.add_argument('--output', choices=['json', 'text'], default=None)
+    oauth_introspect_parser.add_argument('--token-name', default=None)
+    oauth_introspect_parser.add_argument('--token-file', default=None)
+    oauth_introspect_parser.add_argument('--access-token', default=None)
+    oauth_introspect_parser.add_argument('--client-id', default=None)
+    oauth_introspect_parser.add_argument('--client-secret', default=None)
+    oauth_introspect_parser.add_argument('--discovery-url', default=None)
+    oauth_introspect_parser.add_argument('--introspect-url', default=None)
+    oauth_introspect_parser.add_argument('--use-discovery', action=argparse.BooleanOptionalAction, default=None)
 
     for command_name in ('plan', 'connect'):
         sub = subparsers.add_parser(command_name)
@@ -615,6 +699,258 @@ def _prepare_execution_config(args: argparse.Namespace) -> tuple[dict[str, Any],
         saved = save_launch_config(selected_path, candidate_config, state_dir_hint=bootstrap_state_dir)
         return saved, selected_path, True
     return candidate_config, selected_path, False
+
+
+def _coerce_scopes(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    text = str(value).replace(',', ' ')
+    return [part for part in text.split() if part]
+
+
+def _resolve_existing_domain(planner: Planner, domain_selector: str) -> Any:
+    mode, value = _split_selector(domain_selector, label='domain')
+    if mode not in {'existing', 'id', 'existing-id'}:
+        raise ValidationError('OAuth login currently supports only existing domains.', details={'domainSelector': domain_selector})
+    return planner._resolve_domain(mode, value)
+
+
+def _resolve_oauth_endpoints(
+    client: ApiClient,
+    *,
+    use_discovery: bool,
+    discovery_url: str | None,
+    authorize_url: str | None = None,
+    token_url: str | None = None,
+    introspect_url: str | None = None,
+) -> tuple[Meta | None, DiscoveryMetadata | None, str | None, str | None, str | None, str | None]:
+    meta = None
+    discovery = None
+    resolved_discovery_url = discovery_url
+    resolved_authorize_url = authorize_url
+    resolved_token_url = token_url
+    resolved_introspect_url = introspect_url
+    if use_discovery and (not resolved_authorize_url or not resolved_token_url or not resolved_introspect_url or not resolved_discovery_url):
+        meta = Meta.from_api(client.fetch_meta())
+        resolved_discovery_url = resolved_discovery_url or meta.oauth_authorization_server
+        if resolved_discovery_url:
+            discovery = DiscoveryMetadata.from_api(client.fetch_oauth_authorization_server(discovery_url=resolved_discovery_url))
+            resolved_authorize_url = resolved_authorize_url or discovery.authorization_endpoint
+            resolved_token_url = resolved_token_url or discovery.token_endpoint
+            resolved_introspect_url = resolved_introspect_url or discovery.introspection_endpoint
+    return meta, discovery, resolved_discovery_url, resolved_authorize_url, resolved_token_url, resolved_introspect_url
+
+
+def _resolve_token_path(runtime: Any, *, token_name: str | None = None, token_file: str | None = None) -> Path:
+    if token_file:
+        return Path(str(token_file)).expanduser()
+    if not token_name:
+        raise ValidationError('OAuth token name or file is required.', details={'hint': 'Use --token-name or --token-file.'})
+    safe_name = ''.join(ch if ch.isalnum() or ch in {'-', '_'} else '-' for ch in str(token_name))
+    return runtime.oauth_tokens_dir / f'{safe_name}.json'
+
+
+def _run_oauth_login(client: ApiClient, runtime: Any, settings: dict[str, Any]) -> dict[str, Any]:
+    domain_selector = settings.get('domainSelector')
+    client_id = settings.get('clientId')
+    redirect_uri = settings.get('redirectUri')
+    if not domain_selector:
+        raise ValidationError('OAuth login requires a domain selector.', details={'hint': 'Use --domain existing:<name>.'})
+    if not client_id:
+        raise ValidationError('OAuth login requires clientId.', details={'hint': 'Use --client-id.'})
+    if not redirect_uri:
+        raise ValidationError('OAuth login requires redirectUri.', details={'hint': 'Use --redirect-uri.'})
+
+    planner = Planner(client, runtime)
+    domain = _resolve_existing_domain(planner, str(domain_selector))
+    meta, discovery, resolved_discovery_url, authorize_url, token_url, introspect_url = _resolve_oauth_endpoints(
+        client,
+        use_discovery=bool(settings.get('useDiscovery', True)),
+        discovery_url=settings.get('discoveryUrl'),
+        authorize_url=settings.get('authorizeUrl'),
+        token_url=settings.get('tokenUrl'),
+        introspect_url=settings.get('introspectUrl'),
+    )
+    if not authorize_url or not token_url:
+        raise ValidationError('OAuth authorize/token endpoints could not be resolved.', details={'authorizeUrl': authorize_url, 'tokenUrl': token_url})
+
+    scopes = _coerce_scopes(settings.get('scopes'))
+    if not scopes and discovery is not None:
+        scopes = discovery.scopes_supported
+    if not scopes:
+        raise ValidationError('OAuth scopes are required.', details={'hint': 'Use --scopes or enable discovery with advertised scopes.'})
+
+    pkce_pair = generate_pkce_pair() if bool(settings.get('enablePkce', True)) else None
+    authorize_payload: dict[str, Any] = {
+        'domainId': domain.id,
+        'redirectUri': str(redirect_uri),
+        'clientId': str(client_id),
+        'scopes': scopes,
+    }
+    if pkce_pair is not None:
+        authorize_payload['codeChallenge'] = pkce_pair.challenge
+        authorize_payload['codeChallengeMethod'] = pkce_pair.method
+
+    authorize_result = client.authorize_oauth_code(authorize_url=authorize_url, payload=authorize_payload)
+    authorization_code = authorize_result.get('authorizationCode') or authorize_result.get('code')
+    if not authorization_code:
+        raise ValidationError('OAuth authorize response did not contain an authorization code.', details={'response': authorize_result})
+
+    form_payload = {
+        'grant_type': 'authorization_code',
+        'clientId': client_id,
+        'clientSecret': settings.get('clientSecret'),
+        'code': authorization_code,
+        'redirectUri': redirect_uri,
+        'codeVerifier': (pkce_pair.verifier if pkce_pair is not None else None),
+    }
+    token_payload = client.exchange_oauth_token(token_url=token_url, form_payload=form_payload)
+
+    token_name = settings.get('tokenName') or build_token_storage_name(client_id=str(client_id), domain_slug=domain.hostname)
+    token_record = OAuthTokenRecord.from_token_response(
+        name=str(token_name),
+        client_id=str(client_id),
+        client_secret=settings.get('clientSecret'),
+        token_payload=token_payload,
+        resource=(meta.api_base_url if meta is not None else None),
+        redirect_uri=str(redirect_uri),
+        authorize_url=authorize_url,
+        token_url=token_url,
+        introspect_url=introspect_url,
+        discovery_url=resolved_discovery_url,
+        authorization_server=(discovery.issuer if discovery is not None else None),
+        domain_selector=str(domain_selector),
+    )
+    token_path = _resolve_token_path(runtime, token_name=str(token_name), token_file=settings.get('tokenFile'))
+    if bool(settings.get('saveToken', True)):
+        save_token_record(token_path, token_record)
+
+    introspection = None
+    if introspect_url:
+        introspection = client.introspect_oauth_token(
+            introspect_url=introspect_url,
+            token=token_record.access_token,
+            client_id=token_record.client_id,
+            client_secret=token_record.client_secret,
+        )
+
+    return {
+        'ok': True,
+        'mode': 'oauth-login',
+        'domain': domain.to_dict(),
+        'authorize': authorize_result,
+        'token': token_record.to_dict(),
+        'savedTokenPath': str(token_path),
+        'introspection': introspection,
+    }
+
+
+def _run_oauth_refresh(client: ApiClient, runtime: Any, settings: dict[str, Any]) -> dict[str, Any]:
+    token_path = _resolve_token_path(runtime, token_name=settings.get('tokenName'), token_file=settings.get('tokenFile'))
+    record = load_token_record(token_path)
+    if not record.refresh_token:
+        raise ValidationError('Saved OAuth token does not contain a refresh token.', details={'path': str(token_path)})
+
+    _, discovery, resolved_discovery_url, _, token_url, introspect_url = _resolve_oauth_endpoints(
+        client,
+        use_discovery=bool(settings.get('useDiscovery', True)),
+        discovery_url=settings.get('discoveryUrl') or record.discovery_url,
+        token_url=settings.get('tokenUrl') or record.token_url,
+        introspect_url=settings.get('introspectUrl') or record.introspect_url,
+    )
+    token_url = token_url or record.token_url
+    introspect_url = introspect_url or record.introspect_url
+    if not token_url:
+        raise ValidationError('OAuth token endpoint could not be resolved for refresh.', details={'path': str(token_path)})
+
+    token_payload = client.exchange_oauth_token(
+        token_url=token_url,
+        form_payload={
+            'grant_type': 'refresh_token',
+            'clientId': settings.get('clientId') or record.client_id,
+            'clientSecret': settings.get('clientSecret') or record.client_secret,
+            'refresh_token': record.refresh_token,
+        },
+    )
+    refreshed = OAuthTokenRecord.from_token_response(
+        name=record.name,
+        client_id=str(settings.get('clientId') or record.client_id),
+        client_secret=(settings.get('clientSecret') or record.client_secret),
+        token_payload=token_payload,
+        resource=record.resource,
+        redirect_uri=record.redirect_uri,
+        authorize_url=record.authorize_url,
+        token_url=token_url,
+        introspect_url=introspect_url,
+        discovery_url=resolved_discovery_url or record.discovery_url,
+        authorization_server=(discovery.issuer if discovery is not None else record.authorization_server),
+        domain_selector=record.domain_selector,
+        fallback_refresh_token=record.refresh_token,
+    )
+    if bool(settings.get('saveToken', True)):
+        save_token_record(token_path, refreshed)
+
+    introspection = None
+    if introspect_url:
+        introspection = client.introspect_oauth_token(
+            introspect_url=introspect_url,
+            token=refreshed.access_token,
+            client_id=refreshed.client_id,
+            client_secret=refreshed.client_secret,
+        )
+
+    return {
+        'ok': True,
+        'mode': 'oauth-refresh',
+        'token': refreshed.to_dict(),
+        'savedTokenPath': str(token_path),
+        'introspection': introspection,
+    }
+
+
+def _run_oauth_introspect(client: ApiClient, runtime: Any, settings: dict[str, Any]) -> dict[str, Any]:
+    record = None
+    token_path = None
+    access_token = settings.get('accessToken')
+    client_id = settings.get('clientId')
+    client_secret = settings.get('clientSecret')
+    introspect_url = settings.get('introspectUrl')
+    discovery_url = settings.get('discoveryUrl')
+
+    if settings.get('tokenName') or settings.get('tokenFile'):
+        token_path = _resolve_token_path(runtime, token_name=settings.get('tokenName'), token_file=settings.get('tokenFile'))
+        record = load_token_record(token_path)
+        access_token = access_token or record.access_token
+        client_id = client_id or record.client_id
+        client_secret = client_secret or record.client_secret
+        introspect_url = introspect_url or record.introspect_url
+        discovery_url = discovery_url or record.discovery_url
+
+    if not access_token:
+        raise ValidationError('OAuth introspection requires an access token or a saved token reference.', details={'hint': 'Use --access-token or --token-name.'})
+
+    _, _, _, _, _, introspect_url = _resolve_oauth_endpoints(
+        client,
+        use_discovery=bool(settings.get('useDiscovery', True)),
+        discovery_url=discovery_url,
+        introspect_url=introspect_url,
+    )
+    if not introspect_url:
+        raise ValidationError('OAuth introspection endpoint could not be resolved.', details={'hint': 'Use --introspect-url or enable discovery.'})
+
+    introspection = client.introspect_oauth_token(
+        introspect_url=introspect_url,
+        token=str(access_token),
+        client_id=(str(client_id) if client_id else None),
+        client_secret=(str(client_secret) if client_secret else None),
+    )
+    payload: dict[str, Any] = {'ok': True, 'mode': 'oauth-introspect', 'introspection': introspection}
+    if record is not None:
+        payload['token'] = record.to_dict()
+        payload['savedTokenPath'] = str(token_path)
+    return payload
 
 
 def _writer_for_config(config_payload: dict[str, Any]) -> OutputWriter:
@@ -1048,6 +1384,16 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
     if command == 'capabilities':
         log_progress(verbose, 'Fetching capabilities')
         writer.write_capabilities(Capabilities.from_api(client.fetch_capabilities()))
+        return int(ExitCode.SUCCESS)
+
+    if command in {'oauth-login', 'oauth-refresh', 'oauth-introspect'}:
+        settings = dict(config_payload.get(section_key, {}))
+        if command == 'oauth-login':
+            writer.write_payload(_run_oauth_login(client, runtime, settings))
+        elif command == 'oauth-refresh':
+            writer.write_payload(_run_oauth_refresh(client, runtime, settings))
+        else:
+            writer.write_payload(_run_oauth_introspect(client, runtime, settings))
         return int(ExitCode.SUCCESS)
 
     settings = dict(config_payload.get(section_key, {}))

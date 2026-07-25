@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 from tunnellio.cli import build_parser, _apply_explicit_overrides, _prepare_execution_config, _write_runtime_connection_snapshot
@@ -90,6 +91,7 @@ def test_apply_explicit_overrides_updates_connect_section() -> None:
 
 
 def test_prepare_execution_config_updates_default_config_first(tmp_path: Path) -> None:
+    shutil.rmtree(tmp_path, ignore_errors=True)
     tmp_path.mkdir(parents=True, exist_ok=True)
     parser = build_parser()
     args = parser.parse_args([
@@ -111,6 +113,7 @@ def test_prepare_execution_config_updates_default_config_first(tmp_path: Path) -
 
 
 def test_prepare_execution_config_keeps_client_config_when_overwrite_disabled(tmp_path: Path) -> None:
+    shutil.rmtree(tmp_path, ignore_errors=True)
     tmp_path.mkdir(parents=True, exist_ok=True)
     config_path = tmp_path / 'client.json'
     config_path.write_text(
@@ -194,6 +197,32 @@ def test_apply_explicit_overrides_updates_new_contract_fields() -> None:
     assert updated['connect']['useDiscovery'] is True
     assert updated['connect']['sessionStrategy'] == 'open_then_launch'
     assert updated['connect']['enablePkce'] is True
+
+
+def test_oauth_login_parser_accepts_required_flags() -> None:
+    parser = build_parser()
+    args = parser.parse_args([
+        'oauth-login',
+        '--domain', 'existing:demo',
+        '--client-id', 'client-1',
+        '--redirect-uri', 'http://localhost:3333/callback',
+        '--scopes', 'proxy.connect proxy.inspect',
+        '--enable-pkce',
+    ])
+    assert args.command == 'oauth-login'
+    assert args.domain_selector == 'existing:demo'
+    assert args.client_id == 'client-1'
+    assert args.redirect_uri == 'http://localhost:3333/callback'
+    assert args.enable_pkce is True
+
+
+
+def test_oauth_refresh_parser_accepts_token_reference() -> None:
+    parser = build_parser()
+    args = parser.parse_args(['oauth-refresh', '--token-name', 'demo-token'])
+    assert args.command == 'oauth-refresh'
+    assert args.token_name == 'demo-token'
+
 
 
 def test_runtime_connection_snapshot_contains_auth_and_runtime_contracts(tmp_path: Path) -> None:

@@ -28,6 +28,7 @@ class RuntimeConfig:
     state_data_dir: Path
     runtime_dir: Path
     client_configs_dir: Path
+    oauth_tokens_dir: Path
     default_launch_config_path: Path
     insecure_tls: bool = False
 
@@ -40,6 +41,7 @@ class RuntimeConfig:
             self.state_data_dir,
             self.runtime_dir,
             self.client_configs_dir,
+            self.oauth_tokens_dir,
         ]:
             path.mkdir(parents=True, exist_ok=True)
 
@@ -175,6 +177,46 @@ def build_launch_config_template(state_dir: Path | None = None) -> dict[str, Any
             'name': None,
             'pid': None,
         },
+        'oauthLogin': {
+            'output': 'json',
+            'domainSelector': None,
+            'clientId': None,
+            'clientSecret': None,
+            'redirectUri': None,
+            'scopes': None,
+            'discoveryUrl': None,
+            'authorizeUrl': None,
+            'tokenUrl': None,
+            'introspectUrl': None,
+            'tokenName': None,
+            'tokenFile': None,
+            'saveToken': True,
+            'useDiscovery': True,
+            'enablePkce': True,
+        },
+        'oauthRefresh': {
+            'output': 'json',
+            'tokenName': None,
+            'tokenFile': None,
+            'clientId': None,
+            'clientSecret': None,
+            'discoveryUrl': None,
+            'tokenUrl': None,
+            'introspectUrl': None,
+            'useDiscovery': True,
+            'saveToken': True,
+        },
+        'oauthIntrospect': {
+            'output': 'json',
+            'tokenName': None,
+            'tokenFile': None,
+            'accessToken': None,
+            'clientId': None,
+            'clientSecret': None,
+            'discoveryUrl': None,
+            'introspectUrl': None,
+            'useDiscovery': True,
+        },
         'paths': {
             'defaultConfig': str(get_default_launch_config_path(resolved_state_dir)),
             'clientConfigsDir': str(get_client_configs_dir(resolved_state_dir)),
@@ -255,6 +297,7 @@ def load_runtime_config(
         state_data_dir=resolved_state_dir / 'state',
         runtime_dir=resolved_state_dir / 'state' / 'runtimes',
         client_configs_dir=get_client_configs_dir(resolved_state_dir),
+        oauth_tokens_dir=resolved_state_dir / 'oauth_tokens',
         default_launch_config_path=get_default_launch_config_path(resolved_state_dir),
         insecure_tls=bool(resolved_insecure_tls),
     )

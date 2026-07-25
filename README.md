@@ -45,6 +45,11 @@
 - graceful completion ephemeral session через `POST /v1/sessions/complete`
 - session-aware runtime cycle: `open -> heartbeat -> resume -> close`
 - OAuth discovery через `GET /.well-known/oauth-authorization-server`
+- protected resource metadata через `GET /.well-known/oauth-protected-resource`
+- server-side OAuth Authorization Code + PKCE flow через `POST /oauth/authorize` и `POST /oauth/token`
+- CLI-команды `oauth-login`, `oauth-refresh`, `oauth-introspect`
+- локальное хранение OAuth token record с `accessToken`, `refreshToken`, `scope`, `issuer`, endpoint-ами и привязкой к client/domain
+- сохранение старого `refreshToken`, если refresh-response не вернул новый
 - config-поля `requestedAuthMode`, `connectionMode`, `oauthClientPolicy`, `runtimeName`, `useDiscovery`, `sessionStrategy`, `enablePkce`
 - сервер остаётся источником истины по итоговому `authMode` / `connectionMode`; клиент проверяет и отражает фактический результат
 - локальный e2e runner
@@ -119,6 +124,22 @@
 ### Запуск по client config
 ```powershell
 .\tunnellio.exe --config .\configs\prod-api.json
+```
+
+## OAuth: быстрые команды
+### Логин через server-side OAuth flow
+```powershell
+.\tunnellio.exe --token YOUR_TOKEN oauth-login --domain existing:test --client-id YOUR_CLIENT_ID --redirect-uri http://localhost:3333/callback --scopes "proxy.connect proxy.inspect" --token-name test-client --use-discovery --enable-pkce
+```
+
+### Refresh сохранённого OAuth token
+```powershell
+.\tunnellio.exe --token YOUR_TOKEN oauth-refresh --token-name test-client
+```
+
+### Introspect сохранённого OAuth token
+```powershell
+.\tunnellio.exe --token YOUR_TOKEN oauth-introspect --token-name test-client
 ```
 
 ## Управление активными туннелями

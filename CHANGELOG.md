@@ -2,7 +2,7 @@
 
 ## 0.1.6
 - Aligned the client with the new discovery, auth, and session contract
-- Added OAuth discovery helpers, PKCE utilities, and extended session-aware planning/runtime metadata
+- Added OAuth discovery helpers, protected-resource metadata loading, PKCE utilities, and extended session-aware planning/runtime metadata
 - Added live-validated session lifecycle handling with resume-token aware heartbeat, resume, and close calls
 - Expanded config, runtime snapshots, tests, and docs for the new server contract
 
