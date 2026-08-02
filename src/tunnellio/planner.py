@@ -42,6 +42,7 @@ class PlanOptions:
     use_discovery: bool = True
     session_strategy: str | None = None
     enable_pkce: bool = False
+    tcp_bridge_password: str | None = None
 
 
 class Planner:
@@ -103,6 +104,8 @@ class Planner:
                 payload['hostname'] = domain_value
         if options.note:
             payload['note'] = options.note
+        if options.tcp_bridge_password:
+            payload['tcpBridgePassword'] = options.tcp_bridge_password
 
         data = self._client.get_public_tcp_bridge_launch(payload)
         connection_profile = ConnectionProfile.from_api(data.get('connectionProfile', data))
@@ -192,6 +195,8 @@ class Planner:
             }
             if is_tcp_bridge:
                 domain_block['connectionMode'] = 'tcp_bridge'
+                if options.tcp_bridge_password:
+                    domain_block['tcpBridgePassword'] = options.tcp_bridge_password
             root_payload.update(
                 {
                     'domainMode': 'new',

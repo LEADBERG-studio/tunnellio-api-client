@@ -226,6 +226,18 @@ class TcpBridgeDummyClient(DummyClient):
         }
 
 
+class TcpBridgePasswordDummyClient(TcpBridgeDummyClient):
+    """Client that returns a tcp_bridge profile with passwordRequired and clientProtocol."""
+
+    def get_launch_spec(self, payload):
+        base = super().get_launch_spec(payload)
+        base['connectionProfile']['tcpBridge']['passwordRequired'] = True
+        base['connectionProfile']['tcpBridge']['clientProtocol'] = {
+            'hello': {'type': 'hello', 'hostname': 'demo-app'}
+        }
+        return base
+
+
 class KeylessBridgeDummyClient(DummyClient):
     """Client that simulates the public /v1/tcp-bridge/launch endpoint (no token, no key)."""
 
@@ -449,3 +461,44 @@ def test_keyless_bridge_plan_with_generated_subdomain() -> None:
     assert result.connection_profile.public_url is not None
     assert result.connection_profile.tcp_bridge is not None
     assert result.connection_profile.tcp_bridge.public_port == 51001
+
+
+def test_tcp_bridge_password_in_launch_payload() -> None:
+    planner = Planner(DummyClient(), DummyConfig())
+    capabilities = Capabilities.from_api(DummyClient().fetch_capabilities())
+    options = PlanOptions(
+        domain_selector='new:demo-bridge',
+        local_port=3000,
+        connection_mode='tcp_bridge',
+        tcp_bridge_password='my-secret',
+    )
+    payload = planner.build_launch_payload(options, capabilities)
+    assert payload['domain']['tcpBridgePassword'] == 'my-secret'
+
+
+def test_tcp_bridge_password_in_keyless_plan() -> None:
+    planner = Planner(KeylessBridgeDummyClient(), DummyConfig())
+    result = planner.build_keyless_bridge_plan(
+        PlanOptions(
+            local_port=3000,
+            mode='bridge',
+            tcp_bridge_password='bridge-pass',
+        )
+    )
+    assert result.connection_profile.is_tokenless is True
+
+
+def test_password_required_profile_parses() -> None:
+    planner = Planner(TcpBridgePasswordDummyClient(), DummyConfig())
+    result = planner.build_plan(
+        PlanOptions(
+            domain_selector='new:demo-app',
+            local_port=3000,
+            connection_mode='tcp_bridge',
+        )
+    )
+    tb = result.connection_profile.tcp_bridge
+    assert tb is not None
+    assert tb.password_required is True
+    assert tb.client_protocol is not None
+    assert tb.client_protocol.hello == {'type': 'hello', 'hostname': 'demo-app'}

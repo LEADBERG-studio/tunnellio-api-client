@@ -81,6 +81,7 @@ SECTION_FIELD_MAPS: dict[str, dict[str, str]] = {
         'session_strategy': 'sessionStrategy',
         'enable_pkce': 'enablePkce',
         'transport': 'transport',
+        'tcp_bridge_password': 'tcpBridgePassword',
     },
     'connect': {
         'output': 'output',
@@ -101,6 +102,7 @@ SECTION_FIELD_MAPS: dict[str, dict[str, str]] = {
         'session_strategy': 'sessionStrategy',
         'enable_pkce': 'enablePkce',
         'transport': 'transport',
+        'tcp_bridge_password': 'tcpBridgePassword',
         'run': 'run',
         'watch': 'watch',
         'name': 'name',
@@ -122,6 +124,7 @@ SECTION_FIELD_MAPS: dict[str, dict[str, str]] = {
         'local_port': 'localPort',
         'save_profile': 'saveProfile',
         'runtime_name': 'runtimeName',
+        'tcp_bridge_password': 'tcpBridgePassword',
         'run': 'run',
         'watch': 'watch',
         'name': 'name',
@@ -329,6 +332,8 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument('--enable-pkce', action=argparse.BooleanOptionalAction, default=None)
         sub.add_argument('--transport', choices=['ssh', 'tcp-bridge', 'auto'], default=None,
                          help='Force transport: ssh, tcp-bridge, or auto (try ssh, fall back to tcp bridge)')
+        sub.add_argument('--tcp-bridge-password', default=None,
+                         help='Password for TCP bridge when the domain requires one')
         if command_name == 'connect':
             sub.add_argument('--run', action=argparse.BooleanOptionalAction, default=None)
             sub.add_argument('--watch', action=argparse.BooleanOptionalAction, default=None)
@@ -353,6 +358,8 @@ def build_parser() -> argparse.ArgumentParser:
     bridge_parser.add_argument('--local-port', type=int, default=None)
     bridge_parser.add_argument('--save-profile', action=argparse.BooleanOptionalAction, default=None)
     bridge_parser.add_argument('--runtime-name', default=None)
+    bridge_parser.add_argument('--tcp-bridge-password', default=None,
+        help='Password for TCP bridge when the domain requires one')
     bridge_parser.add_argument('--run', action=argparse.BooleanOptionalAction, default=None)
     bridge_parser.add_argument('--watch', action=argparse.BooleanOptionalAction, default=None)
     bridge_parser.add_argument('--name', default=None)
@@ -1097,6 +1104,20 @@ def _run_once(
         tb = cp.tcp_bridge
         assert tb is not None
         secret = tb.token if tb.auth_required else None
+        hello_template = None
+        if tb.client_protocol and tb.client_protocol.hello:
+            hello_template = dict(tb.client_protocol.hello)
+        password = tb.token if tb.password_required else None
+        if tb.password_required and not password:
+            if settings.get('tcpBridgePassword'):
+                password = str(settings.get('tcpBridgePassword'))
+            elif os.getenv('TUNNELLIO_TCP_BRIDGE_PASSWORD'):
+                password = os.getenv('TUNNELLIO_TCP_BRIDGE_PASSWORD')
+            else:
+                raise ValidationError(
+                    'TCP bridge password is required for this domain.',
+                    details={'hint': 'Use --tcp-bridge-password or TUNNELLIO_TCP_BRIDGE_PASSWORD.'},
+                )
         process = launch_bridge(
             host=tb.host or '',
             control_port=tb.control_port or 7835,
@@ -1105,6 +1126,10 @@ def _run_once(
             requested_port=tb.public_port or 0,
             secret=secret,
             logger=logger.log,
+            hello_template=hello_template,
+            password=password,
+            password_required=bool(tb.password_required),
+            hostname=tb.hostname,
         )
         logger.log('Launching native TCP bridge')
     else:
@@ -1549,6 +1574,7 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
         use_discovery=bool(settings.get('useDiscovery', True)),
         session_strategy=settings.get('sessionStrategy'),
         enable_pkce=bool(settings.get('enablePkce')),
+        tcp_bridge_password=settings.get('tcpBridgePassword'),
     )
     log_progress(verbose, f'Building {command} plan')
     if is_bridge_command:

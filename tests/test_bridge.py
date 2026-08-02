@@ -18,9 +18,10 @@ from tunnellio.bridge import (
 class _FakeControlServer:
     """Minimal bore-protocol control server for testing."""
 
-    def __init__(self, *, remote_port: int = 51000, secret: str | None = None):
+    def __init__(self, *, remote_port: int = 51000, secret: str | None = None, native_protocol: bool = False):
         self._remote_port = remote_port
         self._secret = secret
+        self._native = native_protocol
         self._listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._listener.bind(('127.0.0.1', 0))
@@ -66,16 +67,30 @@ class _FakeControlServer:
                 if auth_msg['Authenticate'] != expected:
                     return
             hello_msg = _recv_frame(conn)
-            if hello_msg is None or 'Hello' not in hello_msg:
+            if hello_msg is None:
                 return
-            self.hello_received = hello_msg['Hello']
-            _send_frame(conn, {'Hello': self._remote_port})
-            while not self._stop:
-                msg = _recv_frame(conn, timeout=0.5)
-                if msg is None:
-                    break
-                if 'Accept' in msg:
-                    self.accept_ids.append(msg['Accept'])
+            if self._native:
+                if hello_msg.get('type') != 'hello':
+                    return
+                self.hello_received = hello_msg.get('hostname')
+                _send_frame(conn, {'type': 'hello', 'port': self._remote_port})
+                while not self._stop:
+                    msg = _recv_frame(conn, timeout=0.5)
+                    if msg is None:
+                        break
+                    if msg.get('type') == 'accept':
+                        self.accept_ids.append(msg.get('connectionId', ''))
+            else:
+                if 'Hello' not in hello_msg:
+                    return
+                self.hello_received = hello_msg['Hello']
+                _send_frame(conn, {'Hello': self._remote_port})
+                while not self._stop:
+                    msg = _recv_frame(conn, timeout=0.5)
+                    if msg is None:
+                        break
+                    if 'Accept' in msg:
+                        self.accept_ids.append(msg['Accept'])
         except (OSError, Exception):
             pass
         finally:
@@ -156,6 +171,30 @@ def test_launch_bridge_handshake_with_secret() -> None:
         )
         time.sleep(0.3)
         assert process.remote_port == 51006
+        process.terminate()
+        process.wait(timeout=2.0)
+    finally:
+        server.stop()
+
+
+def test_launch_bridge_with_hello_template_and_password() -> None:
+    server = _FakeControlServer(remote_port=51007, native_protocol=True).start()
+    try:
+        time.sleep(0.1)
+        process = launch_bridge(
+            host=server.host,
+            control_port=server.port,
+            local_host='127.0.0.1',
+            local_port=9999,
+            requested_port=51007,
+            hello_template={'type': 'hello', 'hostname': 'demo-app'},
+            password='demo-secret',
+            password_required=True,
+            hostname='demo-app',
+        )
+        time.sleep(0.3)
+        assert process.remote_port == 51007
+        assert server.hello_received == 'demo-app'
         process.terminate()
         process.wait(timeout=2.0)
     finally:

@@ -8,11 +8,55 @@ TCP bridge — это альтернативный транспорт для т�
 ## Wire protocol
 - Control port: 7835 (TCP)
 - Сообщения: null-delimited JSON frames (max 256 байт)
-- `ClientMessage`: `Hello(port)`, `Accept(uuid)`, `Authenticate(hmac_hex)`
-- `ServerMessage`: `Challenge(uuid)`, `Hello(port)`, `Heartbeat`, `Connection(uuid)`, `Error(msg)`
-- Auth: HMAC-SHA256 от SHA256(secret) по UUID challenge
+- **Native Tunnellio format** (когда сервер возвращает `clientProtocol.hello`):
+  - Client hello: `{"type":"hello","hostname":"demo-app","password":"demo-secret"}`
+  - Server hello: `{"type":"hello","port":51000}`
+  - Connection: `{"type":"connection","connectionId":"..."}`
+  - Accept: `{"type":"accept","connectionId":"...","password":"..."}`
+- **Bore-compatible format** (fallback, когда `clientProtocol` отсутствует):
+  - `ClientMessage`: `Hello(port)`, `Accept(uuid)`, `Authenticate(hmac_hex)`
+  - `ServerMessage`: `Challenge(uuid)`, `Hello(port)`, `Heartbeat`, `Connection(uuid)`, `Error(msg)`
+- Auth: HMAC-SHA256 от SHA256(secret) по UUID challenge (bore mode)
 
 Всё реализовано в `src/tunnellio/bridge.py` на чистой стандартной библиотеке Python.
+
+## TCP bridge password
+Для платных доменов сервер может требовать пароль TCP bridge. Это для приватных демо: URL существует публично, но только клиент, знающий пароль, может подключить bridge-сессию.
+
+API поля:
+```json
+{
+  "connectionMode": "tcp_bridge",
+  "tcpBridgePassword": "demo-secret"
+}
+```
+
+Удаление пароля:
+```json
+{
+  "domainId": 123,
+  "clearTcpBridgePassword": true
+}
+```
+
+Connection profile возвращает:
+```json
+{
+  "tcpBridge": {
+    "passwordRequired": true,
+    "clientProtocol": {
+      "hello": {"type": "hello", "hostname": "demo-app"}
+    }
+  }
+}
+```
+
+Когда `passwordRequired = true`, клиент автоматически:
+1. берёт пароль из `tcpBridge.token`, `--tcp-bridge-password` или `TUNNELLIO_TCP_BRIDGE_PASSWORD`
+2. добавляет `"password"` в hello frame
+3. добавляет `"password"` в accept frame для каждого соединения
+
+Если пароль неверен, сервер возвращает `invalid_bridge_password` и отказывает в сессии.
 
 ## Два способа запуска
 
@@ -141,4 +185,5 @@ TCP bridge — это альтернативный транспорт для т�
 }
 ```
 
-Если `authRequired = true`, мост автоматически добавит `--secret <token>` из `tcpBridge.token` при HMAC-handshake.
+Если `authRequired = true`, мост автоматически использует HMAC-handshake с `tcpBridge.token`.
+Если `passwordRequired = true`, мост автоматически добавляет пароль в hello/accept frames.

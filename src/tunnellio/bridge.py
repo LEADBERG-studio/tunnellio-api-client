@@ -102,7 +102,7 @@ def _bidirectional_copy(local_sock: socket.socket, remote_sock: socket.socket) -
 
 
 class _ConnectionThread(threading.Thread):
-    def __init__(self, conn_id: str, host: str, control_port: int, local_host: str, local_port: int, secret: str | None, logger: Callable[[str], None] | None = None):
+    def __init__(self, conn_id: str, host: str, control_port: int, local_host: str, local_port: int, secret: str | None, logger: Callable[[str], None] | None = None, *, hello_template: dict[str, Any] | None = None, password: str | None = None):
         super().__init__(daemon=True)
         self._conn_id = conn_id
         self._host = host
@@ -111,6 +111,8 @@ class _ConnectionThread(threading.Thread):
         self._local_port = local_port
         self._secret = secret
         self._logger = logger
+        self._hello_template = hello_template
+        self._password = password
 
     def run(self) -> None:
         if self._logger:
@@ -123,7 +125,15 @@ class _ConnectionThread(threading.Thread):
                         self._logger(f'Connection {self._conn_id}: auth failed')
                     remote_sock.close()
                     return
-            _send_frame(remote_sock, {'Accept': self._conn_id})
+            if self._hello_template is not None:
+                accept_frame = dict(self._hello_template)
+                accept_frame['type'] = 'accept'
+                accept_frame['connectionId'] = self._conn_id
+                if self._password:
+                    accept_frame['password'] = self._password
+                _send_frame(remote_sock, accept_frame)
+            else:
+                _send_frame(remote_sock, {'Accept': self._conn_id})
             local_sock = _connect(self._local_host, self._local_port)
             _bidirectional_copy(local_sock, remote_sock)
         except (OSError, ConnectionError) as exc:
@@ -147,6 +157,10 @@ class TcpBridgeProcess:
         requested_port: int = 0,
         secret: str | None = None,
         logger: Callable[[str], None] | None = None,
+        hello_template: dict[str, Any] | None = None,
+        password: str | None = None,
+        password_required: bool = False,
+        hostname: str | None = None,
     ):
         self._host = host
         self._control_port = control_port
@@ -155,6 +169,10 @@ class TcpBridgeProcess:
         self._requested_port = requested_port
         self._secret = secret
         self._logger = logger
+        self._hello_template = hello_template
+        self._password = password
+        self._password_required = password_required
+        self._hostname = hostname
         self._control_sock: socket.socket | None = None
         self._remote_port: int | None = None
         self._returncode: int | None = None
@@ -181,12 +199,29 @@ class TcpBridgeProcess:
         if self._secret:
             if not _auth_handshake(self._control_sock, self._secret):
                 raise RuntimeError('TCP bridge authentication failed')
-        _send_frame(self._control_sock, {'Hello': self._requested_port})
+        if self._hello_template is not None:
+            hello_frame = dict(self._hello_template)
+            if self._password:
+                hello_frame['password'] = self._password
+            _send_frame(self._control_sock, hello_frame)
+        else:
+            _send_frame(self._control_sock, {'Hello': self._requested_port})
         hello = _recv_frame(self._control_sock)
-        if hello is None or 'Hello' not in hello:
-            err = hello.get('Error') if hello else None
-            raise RuntimeError(f'TCP bridge handshake failed: {err or "no response"}')
-        self._remote_port = int(hello['Hello'])
+        if hello is None:
+            raise RuntimeError('TCP bridge handshake failed: no response')
+        if 'Error' in hello:
+            raise RuntimeError(f'TCP bridge handshake failed: {hello["Error"]}')
+        if self._hello_template is not None:
+            remote_port = hello.get('port') or hello.get('publicPort')
+            if remote_port is None and 'Hello' in hello:
+                remote_port = hello['Hello']
+            if remote_port is None:
+                raise RuntimeError(f'TCP bridge handshake failed: {hello}')
+            self._remote_port = int(remote_port)
+        else:
+            if 'Hello' not in hello:
+                raise RuntimeError(f'TCP bridge handshake failed: {hello}')
+            self._remote_port = int(hello['Hello'])
         if self._logger:
             self._logger(f'Bridge connected: {self._host}:{self._remote_port}')
         self._thread = threading.Thread(target=self._control_loop, daemon=True)
@@ -199,26 +234,52 @@ class TcpBridgeProcess:
                 msg = _recv_frame(self._control_sock, timeout=0.5)
                 if msg is None:
                     break
-                if 'Connection' in msg:
-                    conn_id = msg['Connection']
-                    thread = _ConnectionThread(
-                        conn_id=conn_id,
-                        host=self._host,
-                        control_port=self._control_port,
-                        local_host=self._local_host,
-                        local_port=self._local_port,
-                        secret=self._secret,
-                        logger=self._logger,
-                    )
-                    with self._lock:
-                        self._threads.append(thread)
-                    thread.start()
-                elif 'Heartbeat' in msg or msg == 'Heartbeat':
-                    pass
-                elif 'Error' in msg:
-                    if self._logger:
-                        self._logger(f'Bridge server error: {msg["Error"]}')
-                    break
+                if self._hello_template is not None:
+                    msg_type = msg.get('type')
+                    if msg_type == 'connection':
+                        conn_id = str(msg.get('connectionId') or msg.get('id') or '')
+                        thread = _ConnectionThread(
+                            conn_id=conn_id,
+                            host=self._host,
+                            control_port=self._control_port,
+                            local_host=self._local_host,
+                            local_port=self._local_port,
+                            secret=self._secret,
+                            logger=self._logger,
+                            hello_template=self._hello_template,
+                            password=self._password,
+                        )
+                        with self._lock:
+                            self._threads.append(thread)
+                        thread.start()
+                    elif msg_type == 'heartbeat':
+                        pass
+                    elif msg_type == 'error' or 'Error' in msg:
+                        err = msg.get('error') or msg.get('Error')
+                        if self._logger:
+                            self._logger(f'Bridge server error: {err}')
+                        break
+                else:
+                    if 'Connection' in msg:
+                        conn_id = msg['Connection']
+                        thread = _ConnectionThread(
+                            conn_id=conn_id,
+                            host=self._host,
+                            control_port=self._control_port,
+                            local_host=self._local_host,
+                            local_port=self._local_port,
+                            secret=self._secret,
+                            logger=self._logger,
+                        )
+                        with self._lock:
+                            self._threads.append(thread)
+                        thread.start()
+                    elif 'Heartbeat' in msg or msg == 'Heartbeat':
+                        pass
+                    elif 'Error' in msg:
+                        if self._logger:
+                            self._logger(f'Bridge server error: {msg["Error"]}')
+                        break
         except (OSError, ConnectionError):
             pass
         finally:
@@ -282,6 +343,10 @@ def launch_bridge(
     requested_port: int = 0,
     secret: str | None = None,
     logger: Callable[[str], None] | None = None,
+    hello_template: dict[str, Any] | None = None,
+    password: str | None = None,
+    password_required: bool = False,
+    hostname: str | None = None,
 ) -> TcpBridgeProcess:
     process = TcpBridgeProcess(
         host=host,
@@ -291,6 +356,10 @@ def launch_bridge(
         requested_port=requested_port,
         secret=secret,
         logger=logger,
+        hello_template=hello_template,
+        password=password,
+        password_required=password_required,
+        hostname=hostname,
     )
     process.start()
     return process

@@ -128,6 +128,7 @@ def build_launch_config_template(state_dir: Path | None = None) -> dict[str, Any
             'sessionStrategy': None,
             'enablePkce': False,
             'transport': None,
+            'tcpBridgePassword': None,
         },
         'connect': {
             'output': 'text',
@@ -148,6 +149,7 @@ def build_launch_config_template(state_dir: Path | None = None) -> dict[str, Any
             'sessionStrategy': None,
             'enablePkce': False,
             'transport': None,
+            'tcpBridgePassword': None,
             'run': True,
             'watch': True,
             'name': None,
@@ -169,6 +171,7 @@ def build_launch_config_template(state_dir: Path | None = None) -> dict[str, Any
             'localPort': DEFAULT_LOCAL_PORT,
             'saveProfile': False,
             'runtimeName': None,
+            'tcpBridgePassword': None,
             'run': True,
             'watch': True,
             'name': None,

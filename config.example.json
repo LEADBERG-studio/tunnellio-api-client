@@ -32,7 +32,8 @@
     "useDiscovery": true,
     "sessionStrategy": "open_then_launch",
     "enablePkce": true,
-    "transport": null
+    "transport": null,
+    "tcpBridgePassword": null
   },
   "connect": {
     "output": "text",
@@ -53,6 +54,7 @@
     "sessionStrategy": "open_then_launch",
     "enablePkce": true,
     "transport": null,
+    "tcpBridgePassword": null,
     "run": true,
     "watch": true,
     "name": "prod-api",
@@ -132,6 +134,7 @@
     "localPort": 3000,
     "saveProfile": false,
     "runtimeName": null,
+    "tcpBridgePassword": null,
     "run": true,
     "watch": true,
     "name": null,

@@ -255,6 +255,25 @@ def test_bridge_parser_does_not_require_token() -> None:
     assert args.local_port == 3000
 
 
+def test_connect_parser_accepts_tcp_bridge_password() -> None:
+    parser = build_parser()
+    args = parser.parse_args([
+        'connect',
+        '--transport', 'tcp-bridge',
+        '--tcp-bridge-password', 'my-secret',
+    ])
+    assert args.tcp_bridge_password == 'my-secret'
+
+
+def test_bridge_parser_accepts_tcp_bridge_password() -> None:
+    parser = build_parser()
+    args = parser.parse_args([
+        'bridge',
+        '--tcp-bridge-password', 'bridge-pass',
+    ])
+    assert args.tcp_bridge_password == 'bridge-pass'
+
+
 def test_oauth_login_parser_accepts_required_flags() -> None:
     parser = build_parser()
     args = parser.parse_args([

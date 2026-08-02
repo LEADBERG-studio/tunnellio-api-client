@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0
+- Added TCP bridge password support (`tcpBridgePassword`, `passwordRequired`, `clientProtocol`)
+- Added `--tcp-bridge-password` CLI flag for `plan`, `connect`, and `bridge` commands
+- Added `TcpBridgeClientProtocol` model with `hello` template from server
+- Added `passwordRequired` and `clientProtocol` fields to `TcpBridgeProfile`
+- Added `tcpBridgePassword` field to `DomainSummary`
+- Updated `bridge.py` to send native Tunnellio wire format (`{"type":"hello","hostname":"...","password":"..."}`) when `clientProtocol.hello` is provided
+- Updated `bridge.py` to send `{"type":"accept","connectionId":"...","password":"..."}` for connection accept
+- Updated `cli.py` to pass `hello_template`, `password`, `password_required` to `launch_bridge()`
+- Updated `planner.py` to pass `tcpBridgePassword` in launch-spec domain block and keyless bridge payload
+- Updated config template and config example with `tcpBridgePassword` field
+- Added tests for password flow, hello template, and CLI flag parsing
+- Backward compatible: bore-protocol mode still works when `clientProtocol` is absent
+
 ## 0.4.0
 - Implemented native TCP bridge client in pure Python (`tunnellio/bridge.py`) — no external binaries needed
 - Wire protocol: null-delimited JSON frames, bore-compatible control handshake, HMAC-SHA256 auth

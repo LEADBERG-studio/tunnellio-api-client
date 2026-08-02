@@ -571,6 +571,7 @@ class DomainSummary:
     connection_mode: str | None = None
     route_state: str | None = None
     last_heartbeat_at: str | None = None
+    tcp_bridge_password: str | None = None
 
     @classmethod
     def from_api(cls, payload: dict[str, Any]) -> 'DomainSummary':
@@ -595,6 +596,7 @@ class DomainSummary:
             connection_mode=_str_or_none(payload.get('connectionMode')),
             route_state=_str_or_none(payload.get('routeState')),
             last_heartbeat_at=_str_or_none(payload.get('lastHeartbeatAt')),
+            tcp_bridge_password=_str_or_none(payload.get('tcpBridgePassword')),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -621,6 +623,7 @@ class DomainSummary:
             'connectionMode': self.connection_mode,
             'routeState': self.route_state,
             'lastHeartbeatAt': self.last_heartbeat_at,
+            'tcpBridgePassword': self.tcp_bridge_password,
         }.items():
             if value is not None:
                 payload[key] = value
@@ -685,12 +688,31 @@ class SessionSummary:
 
 
 @dataclass(slots=True)
+class TcpBridgeClientProtocol:
+    hello: dict[str, Any] | None = None
+
+    @classmethod
+    def from_api(cls, payload: dict[str, Any] | None) -> 'TcpBridgeClientProtocol | None':
+        if not payload:
+            return None
+        hello = payload.get('hello')
+        return cls(hello=dict(hello) if isinstance(hello, dict) else None)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if self.hello is not None:
+            payload['hello'] = self.hello
+        return payload
+
+
+@dataclass(slots=True)
 class TcpBridgeProfile:
     enabled: bool = False
     protocol: str | None = None
     auth_required: bool | None = None
     requires_ssh_key: bool | None = None
     requires_api_token: bool | None = None
+    password_required: bool | None = None
     host: str | None = None
     control_port: int | None = None
     public_port: int | None = None
@@ -704,6 +726,7 @@ class TcpBridgeProfile:
     token: str | None = None
     command: str | None = None
     args: list[str] = field(default_factory=list)
+    client_protocol: TcpBridgeClientProtocol | None = None
 
     @classmethod
     def from_api(cls, payload: dict[str, Any] | None) -> 'TcpBridgeProfile | None':
@@ -715,6 +738,7 @@ class TcpBridgeProfile:
             auth_required=_bool_or_none(payload.get('authRequired')),
             requires_ssh_key=_bool_or_none(payload.get('requiresSshKey')),
             requires_api_token=_bool_or_none(payload.get('requiresApiToken')),
+            password_required=_bool_or_none(payload.get('passwordRequired')),
             host=_str_or_none(payload.get('host')),
             control_port=_int_or_none(payload.get('controlPort')),
             public_port=_int_or_none(payload.get('publicPort')),
@@ -728,6 +752,7 @@ class TcpBridgeProfile:
             token=_str_or_none(payload.get('token')),
             command=_str_or_none(payload.get('command')),
             args=_list_of_strings(payload.get('args')),
+            client_protocol=TcpBridgeClientProtocol.from_api(payload.get('clientProtocol')),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -740,6 +765,8 @@ class TcpBridgeProfile:
             payload['requiresSshKey'] = self.requires_ssh_key
         if self.requires_api_token is not None:
             payload['requiresApiToken'] = self.requires_api_token
+        if self.password_required is not None:
+            payload['passwordRequired'] = self.password_required
         if self.host is not None:
             payload['host'] = self.host
         if self.control_port is not None:
@@ -766,6 +793,8 @@ class TcpBridgeProfile:
             payload['command'] = self.command
         if self.args:
             payload['args'] = self.args
+        if self.client_protocol is not None:
+            payload['clientProtocol'] = self.client_protocol.to_dict()
         return payload
 
 
