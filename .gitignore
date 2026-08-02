@@ -33,3 +33,6 @@ Thumbs.db
 # Local config
 agent-repo-config.local.json
 *.log
+
+# Stray nested clone safeguard
+tunnellio-api-client/
