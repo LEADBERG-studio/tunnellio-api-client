@@ -1,13 +1,18 @@
 # TCP bridge transport
 
 ## Обзор
-TCP bridge — это альтернативный транспорт для туннелей Tunnellio. Он работает без reverse SSH и без SSH-ключей, что полезно для сред, где:
-- исходящий SSH на портах 22/2222 закрыт;
-- reverse SSH-сессия живёт слишком коротко;
-- нет возможности зарегистрировать SSH public key;
-- нет API-токена (публичный keyless flow).
+TCP bridge — это альтернативный транспорт для туннелей Tunnellio. Он работает без reverse SSH и без SSH-ключей. **Мост реализован нативно на Python внутри клиента** — никаких внешних бинарей не требуется.
 
-Сервер возвращает `connectionMode = tcp_bridge` и готовую команду native bridge-клиента в `connectionProfile.tcpBridge`.
+Клиент сам устанавливает control-соединение к серверу, получает входящие TCP-соединения и пробрасывает их к локальному сервису через `select`-based bidirectional copy.
+
+## Wire protocol
+- Control port: 7835 (TCP)
+- Сообщения: null-delimited JSON frames (max 256 байт)
+- `ClientMessage`: `Hello(port)`, `Accept(uuid)`, `Authenticate(hmac_hex)`
+- `ServerMessage`: `Challenge(uuid)`, `Hello(port)`, `Heartbeat`, `Connection(uuid)`, `Error(msg)`
+- Auth: HMAC-SHA256 от SHA256(secret) по UUID challenge
+
+Всё реализовано в `src/tunnellio/bridge.py` на чистой стандартной библиотеке Python.
 
 ## Два способа запуска
 

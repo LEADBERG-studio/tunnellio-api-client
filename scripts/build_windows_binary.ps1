@@ -42,6 +42,7 @@ import tests.test_config as config_tests
 import tests.test_planner as planner_tests
 import tests.test_client as client_tests
 import tests.test_oauth as oauth_tests
+import tests.test_bridge as bridge_tests
 
 cli_tests.test_parser_allows_empty_argv()
 cli_tests.test_connect_flags_are_optional_until_explicitly_set()
@@ -72,6 +73,11 @@ planner_tests.test_tcp_bridge_build_plan_returns_keyless_profile()
 planner_tests.test_tcp_bridge_session_open_payload_omits_key_id_when_keyless()
 planner_tests.test_keyless_bridge_plan_calls_public_endpoint()
 planner_tests.test_keyless_bridge_plan_with_generated_subdomain()
+bridge_tests.test_send_and_recv_frame_roundtrip()
+bridge_tests.test_auth_tag_computes_hmac_sha256()
+bridge_tests.test_bidirectional_copy_transfers_data()
+bridge_tests.test_launch_bridge_handshake_without_secret()
+bridge_tests.test_launch_bridge_handshake_with_secret()
 client_tests.test_build_ssl_context_insecure()
 client_tests.test_build_ssl_context_windows_uses_truststore_when_available()
 client_tests.test_build_ssl_context_windows_falls_back_when_missing()

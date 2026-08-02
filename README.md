@@ -1,25 +1,22 @@
-# Tunnellio CLI helper
+# Tunnellio CLI
 
-Клиент для Tunnellio Integration API с упором на production-использование через системный OpenSSH.
+Полностью самодостаточный клиент для Tunnellio Integration API. TCP bridge реализован нативно на Python — без внешних бинарей.
 
 ## Формат поставки
 Поддерживаются два сценария:
 
-1. **Сборка из исходников** для разработчика или администратора
-2. **Готовый релизный бинарник** для конечного пользователя
+1. **Сборка из исходников** — Python 3.11+, `pip install .`
+2. **Готовый релизный бинарник** (Windows) — Python не нужен на целевой машине
 
-### Важный нюанс
-Для сборки бинарника из исходников нужна подготовленная build-среда:
-- Python 3.11+
-- pip
-- build dependencies
-- OpenSSH Client для тестов и runtime-проверок
+### Требования по транспорту
+| Транспорт | Что нужно | Где работает |
+|---|---|---|
+| `bridge` (native TCP bridge) | только Python | Windows, Linux, macOS |
+| `connect --transport tcp-bridge` | только Python | Windows, Linux, macOS |
+| `connect --transport ssh` | Python + OpenSSH | везде, где есть SSH |
+| `connect --transport auto` | Python + OpenSSH | везде |
 
-Но **для использования готового релизного бинарника Python на целевой машине не нужен**.
-Нужны только:
-- `tunnellio.exe`
-- системный OpenSSH Client
-- токен API
+**TCP bridge не требует внешних бинарей.** Мост реализован внутри клиента на чистом Python.
 
 ## Что реализовано
 - Bearer auth для POST-only API

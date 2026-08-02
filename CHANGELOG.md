@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+- Implemented native TCP bridge client in pure Python (`tunnellio/bridge.py`) — no external binaries needed
+- Wire protocol: null-delimited JSON frames, bore-compatible control handshake, HMAC-SHA256 auth
+- `cli.py` now runs the bridge natively via `launch_bridge()` instead of `subprocess.Popen` for tcp_bridge transport
+- `TcpBridgeProcess` provides the same `pid`/`poll`/`terminate`/`kill`/`wait` interface as `subprocess.Popen`
+- Bidirectional TCP copy via `select` for connection forwarding
+- Client is now fully self-sufficient on Windows, Linux, and macOS — only Python 3.11+ required
+- Added `tests/test_bridge.py` with fake control server, auth, and forwarding tests
+- Updated build script to include bridge tests
+
 ## 0.3.0
 - Added `bridge` CLI command for one-shot keyless TCP bridge tunnels — no API token, no SSH key required
 - Added public keyless endpoint `POST /v1/tcp-bridge/launch` (no Bearer auth) in ApiClient

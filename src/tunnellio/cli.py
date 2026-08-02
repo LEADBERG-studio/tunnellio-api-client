@@ -14,6 +14,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Sequence
 
+from .bridge import TcpBridgeProcess, launch_bridge
 from .client import ApiClient, build_ssl_context
 from .config import (
     DEFAULT_LOCAL_HOST,
@@ -1071,10 +1072,15 @@ def _run_once(
 ) -> dict[str, Any]:
     if stop_file.exists():
         stop_file.unlink()
-    if not result.connection_profile.effective_args:
+
+    cp = result.connection_profile
+    transport = cp.effective_transport
+    is_native_bridge = transport == 'tcp_bridge' and cp.tcp_bridge is not None and cp.tcp_bridge.enabled
+
+    if not is_native_bridge and not cp.effective_args:
         raise ValidationError('Connection profile did not contain executable args for tunnel launch.')
 
-    health_url = _make_health_url(result.connection_profile.public_url, health_path)
+    health_url = _make_health_url(cp.public_url, health_path)
     logger.log(f'Runtime name: {runtime_name}')
     _announce_plan(logger, result, health_url)
 
@@ -1087,13 +1093,24 @@ def _run_once(
     )
     result.session = active_session
 
-    expanded_args = [os.path.expanduser(arg) if '~' in arg else arg for arg in result.connection_profile.effective_args]
-    transport = result.connection_profile.effective_transport
-    if transport == 'tcp_bridge':
-        logger.log('Launching TCP bridge')
+    if is_native_bridge:
+        tb = cp.tcp_bridge
+        assert tb is not None
+        secret = tb.token if tb.auth_required else None
+        process = launch_bridge(
+            host=tb.host or '',
+            control_port=tb.control_port or 7835,
+            local_host=tb.local_host or cp.local_host or '127.0.0.1',
+            local_port=tb.local_port or cp.local_port or 3000,
+            requested_port=tb.public_port or 0,
+            secret=secret,
+            logger=logger.log,
+        )
+        logger.log('Launching native TCP bridge')
     else:
+        expanded_args = [os.path.expanduser(arg) if '~' in arg else arg for arg in cp.effective_args]
         logger.log('Launching SSH bridge')
-    process = subprocess.Popen(expanded_args)
+        process = subprocess.Popen(expanded_args)
     logger.log(f'{transport} pid: {process.pid}')
 
     _write_status(
@@ -1236,10 +1253,13 @@ def _run_once(
             process.terminate()
             try:
                 process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                logger.log('SSH did not stop gracefully; killing process')
+            except (subprocess.TimeoutExpired, OSError):
+                logger.log('Process did not stop gracefully; killing')
                 process.kill()
-                process.wait(timeout=10)
+                try:
+                    process.wait(timeout=10)
+                except OSError:
+                    pass
         return_code = process.returncode
         session_closed = _close_runtime_session(client, active_session, logger=logger, reason=reason)
         session_completed = _complete_ephemeral_session(client, active_session, logger)
