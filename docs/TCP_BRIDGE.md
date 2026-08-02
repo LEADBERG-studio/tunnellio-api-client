@@ -96,7 +96,7 @@ TCP bridge — это альтернативный транспорт для т�
 
 ## Поведение клиента
 
-1. При `connectionMode = tcp_bridge` клиент запускает `tcpBridge.args`, а не SSH.
+1. При `connectionMode = tcp_bridge` клиент **запускает мост нативно** через `launch_bridge()` из `bridge.py` — без внешних бинарей.
 2. При `connectionMode = auto` клиент сначала пробует SSH, затем TCP bridge при отказе.
 3. Команда `bridge` вызывает публичный keyless endpoint, минуя `/v1/launch-spec`, meta и capabilities.
 4. Клиент сохраняет в профиле `requiresSshKey`, `requiresApiToken`, `tcpBridge`, `publicUrl`, `connectionMode`.
@@ -104,6 +104,7 @@ TCP bridge — это альтернативный транспорт для т�
 6. Клиент не требует API token, если `requiresApiToken = false`.
 7. В логах, `status` и `show-config` отображается фактический транспорт.
 8. В runtime config snapshot включается блок `tcpBridge` и `effectiveTransport`.
+9. `TcpBridgeProcess` совместим по интерфейсу с `subprocess.Popen` (`pid`, `poll`, `terminate`, `kill`, `wait`).
 
 ## Connection profile
 Ответ содержит `tcpBridge` блок:
@@ -140,4 +141,4 @@ TCP bridge — это альтернативный транспорт для т�
 }
 ```
 
-Если `authRequired = true`, клиент обязан добавить `--secret <token>` из `tcpBridge.token`.
+Если `authRequired = true`, мост автоматически добавит `--secret <token>` из `tcpBridge.token` при HMAC-handshake.

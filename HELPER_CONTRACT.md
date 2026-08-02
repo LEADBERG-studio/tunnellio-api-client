@@ -26,8 +26,17 @@ Example:
 tunnellio connect --domain random --key existing:work-laptop --local-port 3000 --run
 ```
 - creates the plan;
-- launches SSH;
+- launches SSH or native TCP bridge (depending on transport);
 - returns process/session metadata.
+
+### 4. Bridge mode (keyless, no token)
+Example:
+```bash
+tunnellio bridge --local-port 3000 --run
+```
+- calls `POST /v1/tcp-bridge/launch` without Bearer auth;
+- launches the native TCP bridge (pure Python, no external binaries);
+- returns connection profile and process metadata.
 
 ## Stdout/stderr contract
 

@@ -3,13 +3,12 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import select
 import socket
 import threading
 import time
 import uuid
-from typing import Any, Callable, Sequence
+from typing import Any, Callable
 
 CONTROL_PORT_DEFAULT = 7835
 NETWORK_TIMEOUT = 3.0
@@ -112,7 +111,6 @@ class _ConnectionThread(threading.Thread):
         self._local_port = local_port
         self._secret = secret
         self._logger = logger
-        self._should_stop = False
 
     def run(self) -> None:
         if self._logger:
@@ -232,9 +230,17 @@ class TcpBridgeProcess:
             return self._returncode
         if self._control_sock is not None:
             try:
-                _recv_frame(self._control_sock, timeout=0.0)
-            except Exception:
-                pass
+                readable, _, _ = select.select([self._control_sock], [], [], 0.0)
+                if readable:
+                    data = self._control_sock.recv(1, socket.MSG_PEEK)
+                    if not data:
+                        with self._lock:
+                            if self._returncode is None:
+                                self._returncode = 0
+            except (OSError, ConnectionError):
+                with self._lock:
+                    if self._returncode is None:
+                        self._returncode = 0
         if self._thread is not None and not self._thread.is_alive():
             with self._lock:
                 if self._returncode is None:
