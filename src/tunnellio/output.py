@@ -23,21 +23,34 @@ class OutputWriter:
             print(json.dumps(result.to_dict(), indent=2))
             return
 
+        cp = result.connection_profile
         print('Plan created successfully.')
         print(f'API: {result.meta.api_base_url} ({result.meta.api_version})')
-        print(f'Key: {result.key.name} (id={result.key.id})')
+        if result.key is not None:
+            print(f'Key: {result.key.name} (id={result.key.id})')
+        else:
+            print('Key: (not required for tcp_bridge)')
         print(f'Domain: {result.domain.hostname}')
-        print(f'Public URL: {result.connection_profile.public_url}')
-        print(
-            'SSH target: '
-            f'{result.connection_profile.ssh_user}@{result.connection_profile.ssh_host}:{result.connection_profile.ssh_port}'
-        )
-        print(
-            'Forward: '
-            f'{result.connection_profile.remote_hostname} <- '
-            f'{result.connection_profile.local_host}:{result.connection_profile.local_port}'
-        )
-        print(f'Command: {result.connection_profile.ssh_command}')
+        print(f'Public URL: {cp.public_url}')
+        if cp.is_tcp_bridge:
+            print(f'Transport: tcp_bridge (no SSH key required)')
+            tb = cp.tcp_bridge
+            if tb:
+                if tb.public_port is not None:
+                    print(f'Public TCP port: {tb.public_port}')
+                if tb.host:
+                    print(f'Bridge host: {tb.host}:{tb.control_port}')
+        else:
+            print(
+                'SSH target: '
+                f'{cp.ssh_user}@{cp.ssh_host}:{cp.ssh_port}'
+            )
+            print(
+                'Forward: '
+                f'{cp.remote_hostname} <- '
+                f'{cp.local_host}:{cp.local_port}'
+            )
+            print(f'Command: {cp.ssh_command}')
         if result.session is not None:
             print(f'Ephemeral session: {result.session.id}')
         if result.saved_profile is not None:

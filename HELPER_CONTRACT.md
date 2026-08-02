@@ -41,6 +41,7 @@ tunnellio connect --domain random --key existing:work-laptop --local-port 3000 -
 
 ## Minimum JSON result schema
 
+### SSH reverse tunnel
 ```json
 {
   "ok": true,
@@ -67,7 +68,8 @@ tunnellio connect --domain random --key existing:work-laptop --local-port 3000 -
   },
   "launch": {
     "command": "ssh ...",
-    "args": ["ssh", "-i", "~/.tunnellio/keys/work-laptop", "-N", "..."]
+    "args": ["ssh", "-i", "~/.tunnellio/keys/work-laptop", "-N", "..."],
+    "transport": "ssh"
   },
   "savedProfile": {
     "name": "mcp-dev",
@@ -75,6 +77,63 @@ tunnellio connect --domain random --key existing:work-laptop --local-port 3000 -
   }
 }
 ```
+
+### Keyless TCP bridge
+When `connectionMode = tcp_bridge` and `requiresSshKey = false`, the `key` field is omitted
+and the `launch` block contains the native bridge command instead of SSH args:
+```json
+{
+  "ok": true,
+  "mode": "plan",
+  "domain": {
+    "id": 3,
+    "hostname": "demo-app",
+    "fqdn": "demo-app.tunnellio.site",
+    "publicUrl": "https://demo-app.tunnellio.site",
+    "mode": "persistent",
+    "connectionMode": "tcp_bridge"
+  },
+  "connectionProfile": {
+    "connectionMode": "tcp_bridge",
+    "requiresSshKey": false,
+    "publicUrl": "https://demo-app.tunnellio.site",
+    "localHost": "127.0.0.1",
+    "localPort": 3000,
+    "tcpBridge": {
+      "enabled": true,
+      "protocol": "bore",
+      "authRequired": false,
+      "requiresSshKey": false,
+      "host": "tunnel.example.net",
+      "controlPort": 7835,
+      "publicPort": 51000,
+      "publicBaseDomain": "tunnel.example.net",
+      "hostname": "demo-app",
+      "publicUrl": "https://demo-app.tunnellio.site",
+      "localHost": "127.0.0.1",
+      "localPort": 3000,
+      "preconfiguredSubdomain": true,
+      "generatedSubdomain": false,
+      "token": null,
+      "command": "tunnellio-bridge connect --host tunnel.example.net --control-port 7835 --hostname demo-app --local-host 127.0.0.1 --local-port 3000",
+      "args": ["tunnellio-bridge", "connect", "--host", "tunnel.example.net", "--control-port", "7835", "--hostname", "demo-app", "--local-host", "127.0.0.1", "--local-port", "3000"]
+    }
+  },
+  "launch": {
+    "command": "tunnellio-bridge connect --host tunnel.example.net --control-port 7835 --hostname demo-app --local-host 127.0.0.1 --local-port 3000",
+    "args": ["tunnellio-bridge", "connect", "--host", "tunnel.example.net", "--control-port", "7835", "--hostname", "demo-app", "--local-host", "127.0.0.1", "--local-port", "3000"],
+    "transport": "tcp_bridge"
+  },
+  "savedProfile": {
+    "name": "demo-app",
+    "path": "~/.tunnellio/profiles/demo-app.json"
+  }
+}
+```
+
+The `key` field is absent when the connection is keyless. Callers should check
+`connectionProfile.requiresSshKey` / `connectionProfile.tcpBridge.enabled` or
+`launch.transport` before assuming SSH.
 
 ## Error contract
 

@@ -6,6 +6,7 @@
 
 ## Runtime and operations
 - `CONFIGS.md` — default config, client configs, overwrite rules, runtime names, and launch order
+- `TCP_BRIDGE.md` — keyless TCP bridge transport, `--transport` flag, and auto-fallback
 - `INTEGRATION.md` — machine-caller contract, random-domain flow, and retrieving server-side connection data by runtime name
 - `OPERATIONS.md` — how the client works, how it differs from raw SSH, and how to supervise it in production
 - `TESTING.md` — local test strategy and commands

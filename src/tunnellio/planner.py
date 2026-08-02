@@ -55,7 +55,7 @@ class Planner:
         payload = self.build_launch_payload(options, capabilities)
         data = self._client.get_launch_spec(payload)
 
-        key = KeySummary.from_api(data['key'])
+        key = KeySummary.from_api(data['key']) if data.get('key') else None
         domain = DomainSummary.from_api(data['domain'])
         connection_profile = ConnectionProfile.from_api(data['connectionProfile'])
         session = SessionSummary.from_api(data['session']) if data.get('session') else None
@@ -119,10 +119,13 @@ class Planner:
         if options.enable_pkce:
             root_payload['enablePkce'] = True
 
+        is_tcp_bridge = options.connection_mode == 'tcp_bridge'
+
         if domain_mode in {'random', 'ephemeral', 'ephemeral_random'}:
             if not capabilities.ephemeral.enabled or not capabilities.domains.supports_random_ephemeral:
                 raise ValidationError('Random ephemeral domains are not available for this token.')
-            key_payload = self._build_key_payload(options, capabilities, required=True)
+            key_required = not is_tcp_bridge
+            key_payload = self._build_key_payload(options, capabilities, required=key_required)
             root_payload.update(
                 {
                     'domainMode': 'ephemeral_random',
@@ -136,15 +139,19 @@ class Planner:
             if not capabilities.domains.can_create:
                 raise ValidationError('Creating persistent domains is not allowed for this token.')
             self._validate_domain_lifetime(options.domain_lifetime_days, capabilities)
-            key_payload = self._build_key_payload(options, capabilities, required=True)
+            key_required = not is_tcp_bridge
+            key_payload = self._build_key_payload(options, capabilities, required=key_required)
+            domain_block: dict[str, Any] = {
+                'hostname': domain_value,
+                'requestedLifetimeDays': options.domain_lifetime_days,
+                'note': options.note or '',
+            }
+            if is_tcp_bridge:
+                domain_block['connectionMode'] = 'tcp_bridge'
             root_payload.update(
                 {
                     'domainMode': 'new',
-                    'domain': {
-                        'hostname': domain_value,
-                        'requestedLifetimeDays': options.domain_lifetime_days,
-                        'note': options.note or '',
-                    },
+                    'domain': domain_block,
                     'key': key_payload,
                 }
             )
@@ -153,8 +160,10 @@ class Planner:
         if domain_mode in {'existing', 'id', 'existing-id'}:
             domain = self._resolve_domain(domain_mode, domain_value)
             key_payload = None
-            if domain.key_id is None:
+            if domain.key_id is None and not is_tcp_bridge:
                 key_payload = self._build_key_payload(options, capabilities, required=True)
+            elif domain.key_id is not None and not is_tcp_bridge:
+                key_payload = self._build_key_payload(options, capabilities, required=False)
             root_payload.update(
                 {
                     'domainMode': 'existing',
@@ -172,14 +181,13 @@ class Planner:
     def build_session_open_payload(
         self,
         options: PlanOptions,
-        key: KeySummary,
+        key: KeySummary | None,
         domain: DomainSummary,
         connection_profile: ConnectionProfile,
         session: SessionSummary | None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             'runtimeName': options.runtime_name or domain.hostname,
-            'keyId': key.id,
             'domainId': domain.id,
             'hostname': domain.hostname,
             'publicUrl': connection_profile.public_url,
@@ -190,6 +198,8 @@ class Planner:
             'authMode': connection_profile.auth_mode or domain.auth_mode or options.requested_auth_mode,
             'connectionMode': connection_profile.connection_mode or domain.connection_mode or options.connection_mode,
         }
+        if key is not None:
+            payload['keyId'] = key.id
         if connection_profile.oauth_client_policy or options.oauth_client_policy:
             payload['oauthClientPolicy'] = connection_profile.oauth_client_policy or options.oauth_client_policy
         if options.session_strategy:
@@ -413,7 +423,7 @@ class Planner:
     def _save_profile(
         self,
         meta: Meta,
-        key: KeySummary,
+        key: KeySummary | None,
         domain: DomainSummary,
         connection_profile: ConnectionProfile,
         session: SessionSummary | None,
@@ -421,10 +431,11 @@ class Planner:
         target_path = self._config.profiles_dir / f'{domain.hostname}.json'
         payload: dict[str, Any] = {
             'meta': meta.to_dict(),
-            'key': key.to_dict(),
             'domain': domain.to_dict(),
             'connectionProfile': connection_profile.to_dict(),
         }
+        if key is not None:
+            payload['key'] = key.to_dict()
         if session is not None:
             payload['session'] = session.to_dict()
         temp_path = target_path.with_suffix(target_path.suffix + '.tmp')

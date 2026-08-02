@@ -31,7 +31,8 @@
     "runtimeName": "prod-api",
     "useDiscovery": true,
     "sessionStrategy": "open_then_launch",
-    "enablePkce": true
+    "enablePkce": true,
+    "transport": null
   },
   "connect": {
     "output": "text",
@@ -51,6 +52,7 @@
     "useDiscovery": true,
     "sessionStrategy": "open_then_launch",
     "enablePkce": true,
+    "transport": null,
     "run": true,
     "watch": true,
     "name": "prod-api",

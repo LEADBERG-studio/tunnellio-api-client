@@ -123,6 +123,47 @@ class ProtectedResourceMetadata:
 
 
 @dataclass(slots=True)
+class TcpBridgeMeta:
+    enabled: bool = False
+    protocol: str | None = None
+    host: str | None = None
+    control_port: int | None = None
+    public_base_domain: str | None = None
+    requires_ssh_key: bool | None = None
+    auth_required: bool | None = None
+
+    @classmethod
+    def from_api(cls, payload: dict[str, Any] | None) -> 'TcpBridgeMeta | None':
+        if not payload:
+            return None
+        return cls(
+            enabled=bool(payload.get('enabled', False)),
+            protocol=_str_or_none(payload.get('protocol')),
+            host=_str_or_none(payload.get('host')),
+            control_port=_int_or_none(payload.get('controlPort')),
+            public_base_domain=_str_or_none(payload.get('publicBaseDomain')),
+            requires_ssh_key=_bool_or_none(payload.get('requiresSshKey')),
+            auth_required=_bool_or_none(payload.get('authRequired')),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {'enabled': self.enabled}
+        if self.protocol is not None:
+            payload['protocol'] = self.protocol
+        if self.host is not None:
+            payload['host'] = self.host
+        if self.control_port is not None:
+            payload['controlPort'] = self.control_port
+        if self.public_base_domain is not None:
+            payload['publicBaseDomain'] = self.public_base_domain
+        if self.requires_ssh_key is not None:
+            payload['requiresSshKey'] = self.requires_ssh_key
+        if self.auth_required is not None:
+            payload['authRequired'] = self.auth_required
+        return payload
+
+
+@dataclass(slots=True)
 class Meta:
     api_version: str
     server_version: str
@@ -142,6 +183,7 @@ class Meta:
     oauth_issuer: str | None = None
     oauth_proxy_enabled: bool | None = None
     oauth_token_verification: str | None = None
+    tcp_bridge: TcpBridgeMeta | None = None
 
     @classmethod
     def from_api(cls, payload: dict[str, Any]) -> 'Meta':
@@ -164,6 +206,7 @@ class Meta:
             oauth_issuer=_str_or_none(payload.get('oauthIssuer')),
             oauth_proxy_enabled=_bool_or_none(payload.get('oauthProxyEnabled')),
             oauth_token_verification=_str_or_none(payload.get('oauthTokenVerification')),
+            tcp_bridge=TcpBridgeMeta.from_api(payload.get('tcpBridge')),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -194,6 +237,8 @@ class Meta:
             payload['oauthProxyEnabled'] = self.oauth_proxy_enabled
         if self.oauth_token_verification is not None:
             payload['oauthTokenVerification'] = self.oauth_token_verification
+        if self.tcp_bridge is not None:
+            payload['tcpBridge'] = self.tcp_bridge.to_dict()
         return payload
 
 
@@ -285,6 +330,82 @@ class OAuthProxyCapabilities:
 
 
 @dataclass(slots=True)
+class TcpBridgePortRange:
+    min_port: int | None = None
+    max_port: int | None = None
+
+    @classmethod
+    def from_api(cls, payload: dict[str, Any] | None) -> 'TcpBridgePortRange | None':
+        if not payload:
+            return None
+        return cls(
+            min_port=_int_or_none(payload.get('min')),
+            max_port=_int_or_none(payload.get('max')),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if self.min_port is not None:
+            payload['min'] = self.min_port
+        if self.max_port is not None:
+            payload['max'] = self.max_port
+        return payload
+
+
+@dataclass(slots=True)
+class TcpBridgeCapabilities:
+    enabled: bool = False
+    protocol: str | None = None
+    host: str | None = None
+    control_port: int | None = None
+    public_base_domain: str | None = None
+    port_range: TcpBridgePortRange | None = None
+    supports_preconfigured_subdomains: bool | None = None
+    supports_generated_subdomains: bool | None = None
+    requires_ssh_key: bool | None = None
+    auth_required: bool | None = None
+
+    @classmethod
+    def from_api(cls, payload: dict[str, Any] | None) -> 'TcpBridgeCapabilities | None':
+        if not payload:
+            return None
+        return cls(
+            enabled=bool(payload.get('enabled', False)),
+            protocol=_str_or_none(payload.get('protocol')),
+            host=_str_or_none(payload.get('host')),
+            control_port=_int_or_none(payload.get('controlPort')),
+            public_base_domain=_str_or_none(payload.get('publicBaseDomain')),
+            port_range=TcpBridgePortRange.from_api(payload.get('portRange')),
+            supports_preconfigured_subdomains=_bool_or_none(payload.get('supportsPreconfiguredSubdomains')),
+            supports_generated_subdomains=_bool_or_none(payload.get('supportsGeneratedSubdomains')),
+            requires_ssh_key=_bool_or_none(payload.get('requiresSshKey')),
+            auth_required=_bool_or_none(payload.get('authRequired')),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {'enabled': self.enabled}
+        if self.protocol is not None:
+            payload['protocol'] = self.protocol
+        if self.host is not None:
+            payload['host'] = self.host
+        if self.control_port is not None:
+            payload['controlPort'] = self.control_port
+        if self.public_base_domain is not None:
+            payload['publicBaseDomain'] = self.public_base_domain
+        if self.port_range is not None:
+            payload['portRange'] = self.port_range.to_dict()
+        if self.supports_preconfigured_subdomains is not None:
+            payload['supportsPreconfiguredSubdomains'] = self.supports_preconfigured_subdomains
+        if self.supports_generated_subdomains is not None:
+            payload['supportsGeneratedSubdomains'] = self.supports_generated_subdomains
+        if self.requires_ssh_key is not None:
+            payload['requiresSshKey'] = self.requires_ssh_key
+        if self.auth_required is not None:
+            payload['authRequired'] = self.auth_required
+        return payload
+
+
+@dataclass(slots=True)
 class DomainCapabilities:
     can_create: bool
     can_delete: bool
@@ -296,6 +417,8 @@ class DomainCapabilities:
     supported_connection_modes: list[str] = field(default_factory=list)
     default_connection_mode: str | None = None
     oauth_proxy: OAuthProxyCapabilities = field(default_factory=OAuthProxyCapabilities)
+    supports_keyless_tcp_bridge: bool | None = None
+    tcp_bridge: TcpBridgeCapabilities | None = None
 
     @classmethod
     def from_api(cls, payload: dict[str, Any]) -> 'DomainCapabilities':
@@ -310,6 +433,8 @@ class DomainCapabilities:
             supported_connection_modes=_list_of_strings(payload.get('supportedConnectionModes')),
             default_connection_mode=_str_or_none(payload.get('defaultConnectionMode')),
             oauth_proxy=OAuthProxyCapabilities.from_api(payload.get('oauthProxy')),
+            supports_keyless_tcp_bridge=_bool_or_none(payload.get('supportsKeylessTcpBridge')),
+            tcp_bridge=TcpBridgeCapabilities.from_api(payload.get('tcpBridge')),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -329,6 +454,10 @@ class DomainCapabilities:
             payload['defaultConnectionMode'] = self.default_connection_mode
         if self.oauth_proxy:
             payload['oauthProxy'] = self.oauth_proxy.to_dict()
+        if self.supports_keyless_tcp_bridge is not None:
+            payload['supportsKeylessTcpBridge'] = self.supports_keyless_tcp_bridge
+        if self.tcp_bridge is not None:
+            payload['tcpBridge'] = self.tcp_bridge.to_dict()
         return payload
 
 
@@ -556,17 +685,98 @@ class SessionSummary:
 
 
 @dataclass(slots=True)
+class TcpBridgeProfile:
+    enabled: bool = False
+    protocol: str | None = None
+    auth_required: bool | None = None
+    requires_ssh_key: bool | None = None
+    host: str | None = None
+    control_port: int | None = None
+    public_port: int | None = None
+    public_base_domain: str | None = None
+    hostname: str | None = None
+    public_url: str | None = None
+    local_host: str | None = None
+    local_port: int | None = None
+    preconfigured_subdomain: bool | None = None
+    generated_subdomain: bool | None = None
+    token: str | None = None
+    command: str | None = None
+    args: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_api(cls, payload: dict[str, Any] | None) -> 'TcpBridgeProfile | None':
+        if not payload:
+            return None
+        return cls(
+            enabled=bool(payload.get('enabled', False)),
+            protocol=_str_or_none(payload.get('protocol')),
+            auth_required=_bool_or_none(payload.get('authRequired')),
+            requires_ssh_key=_bool_or_none(payload.get('requiresSshKey')),
+            host=_str_or_none(payload.get('host')),
+            control_port=_int_or_none(payload.get('controlPort')),
+            public_port=_int_or_none(payload.get('publicPort')),
+            public_base_domain=_str_or_none(payload.get('publicBaseDomain')),
+            hostname=_str_or_none(payload.get('hostname')),
+            public_url=_str_or_none(payload.get('publicUrl')),
+            local_host=_str_or_none(payload.get('localHost')),
+            local_port=_int_or_none(payload.get('localPort')),
+            preconfigured_subdomain=_bool_or_none(payload.get('preconfiguredSubdomain')),
+            generated_subdomain=_bool_or_none(payload.get('generatedSubdomain')),
+            token=_str_or_none(payload.get('token')),
+            command=_str_or_none(payload.get('command')),
+            args=_list_of_strings(payload.get('args')),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {'enabled': self.enabled}
+        if self.protocol is not None:
+            payload['protocol'] = self.protocol
+        if self.auth_required is not None:
+            payload['authRequired'] = self.auth_required
+        if self.requires_ssh_key is not None:
+            payload['requiresSshKey'] = self.requires_ssh_key
+        if self.host is not None:
+            payload['host'] = self.host
+        if self.control_port is not None:
+            payload['controlPort'] = self.control_port
+        if self.public_port is not None:
+            payload['publicPort'] = self.public_port
+        if self.public_base_domain is not None:
+            payload['publicBaseDomain'] = self.public_base_domain
+        if self.hostname is not None:
+            payload['hostname'] = self.hostname
+        if self.public_url is not None:
+            payload['publicUrl'] = self.public_url
+        if self.local_host is not None:
+            payload['localHost'] = self.local_host
+        if self.local_port is not None:
+            payload['localPort'] = self.local_port
+        if self.preconfigured_subdomain is not None:
+            payload['preconfiguredSubdomain'] = self.preconfigured_subdomain
+        if self.generated_subdomain is not None:
+            payload['generatedSubdomain'] = self.generated_subdomain
+        if self.token is not None:
+            payload['token'] = self.token
+        if self.command is not None:
+            payload['command'] = self.command
+        if self.args:
+            payload['args'] = self.args
+        return payload
+
+
+@dataclass(slots=True)
 class ConnectionProfile:
-    ssh_host: str
-    ssh_port: int
-    ssh_user: str
-    remote_hostname: str
-    local_host: str
-    local_port: int
-    public_url: str
-    ssh_command: str
-    ssh_args: list[str]
-    ssh_config_snippet: str
+    ssh_host: str | None = None
+    ssh_port: int | None = None
+    ssh_user: str | None = None
+    remote_hostname: str | None = None
+    local_host: str | None = None
+    local_port: int | None = None
+    public_url: str | None = None
+    ssh_command: str | None = None
+    ssh_args: list[str] = field(default_factory=list)
+    ssh_config_snippet: str | None = None
     auth_mode: str | None = None
     connection_mode: str | None = None
     oauth_client_policy: str | None = None
@@ -575,20 +785,22 @@ class ConnectionProfile:
     token_url: str | None = None
     introspect_url: str | None = None
     token_verification: str | None = None
+    requires_ssh_key: bool | None = None
+    tcp_bridge: TcpBridgeProfile | None = None
 
     @classmethod
     def from_api(cls, payload: dict[str, Any]) -> 'ConnectionProfile':
         return cls(
-            ssh_host=str(payload['sshHost']),
-            ssh_port=int(payload['sshPort']),
-            ssh_user=str(payload['sshUser']),
-            remote_hostname=str(payload['remoteHostname']),
-            local_host=str(payload['localHost']),
-            local_port=int(payload['localPort']),
-            public_url=str(payload['publicUrl']),
-            ssh_command=str(payload['sshCommand']),
+            ssh_host=_str_or_none(payload.get('sshHost')),
+            ssh_port=_int_or_none(payload.get('sshPort')),
+            ssh_user=_str_or_none(payload.get('sshUser')),
+            remote_hostname=_str_or_none(payload.get('remoteHostname')),
+            local_host=_str_or_none(payload.get('localHost')),
+            local_port=_int_or_none(payload.get('localPort')),
+            public_url=_str_or_none(payload.get('publicUrl')),
+            ssh_command=_str_or_none(payload.get('sshCommand')),
             ssh_args=[str(item) for item in payload.get('sshArgs', [])],
-            ssh_config_snippet=str(payload['sshConfigSnippet']),
+            ssh_config_snippet=_str_or_none(payload.get('sshConfigSnippet')),
             auth_mode=_str_or_none(payload.get('authMode')),
             connection_mode=_str_or_none(payload.get('connectionMode')),
             oauth_client_policy=_str_or_none(payload.get('oauthClientPolicy')),
@@ -597,10 +809,13 @@ class ConnectionProfile:
             token_url=_str_or_none(payload.get('tokenUrl')),
             introspect_url=_str_or_none(payload.get('introspectUrl')),
             token_verification=_str_or_none(payload.get('tokenVerification')),
+            requires_ssh_key=_bool_or_none(payload.get('requiresSshKey')),
+            tcp_bridge=TcpBridgeProfile.from_api(payload.get('tcpBridge')),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        payload = {
+        payload: dict[str, Any] = {}
+        for key, value in {
             'sshHost': self.ssh_host,
             'sshPort': self.ssh_port,
             'sshUser': self.ssh_user,
@@ -611,8 +826,6 @@ class ConnectionProfile:
             'sshCommand': self.ssh_command,
             'sshArgs': self.ssh_args,
             'sshConfigSnippet': self.ssh_config_snippet,
-        }
-        for key, value in {
             'authMode': self.auth_mode,
             'connectionMode': self.connection_mode,
             'oauthClientPolicy': self.oauth_client_policy,
@@ -621,10 +834,44 @@ class ConnectionProfile:
             'tokenUrl': self.token_url,
             'introspectUrl': self.introspect_url,
             'tokenVerification': self.token_verification,
+            'requiresSshKey': self.requires_ssh_key,
         }.items():
-            if value is not None:
-                payload[key] = value
+            if value is None or value == []:
+                continue
+            payload[key] = value
+        if self.tcp_bridge is not None:
+            payload['tcpBridge'] = self.tcp_bridge.to_dict()
         return payload
+
+    @property
+    def effective_command(self) -> str:
+        if self.tcp_bridge and self.tcp_bridge.enabled:
+            return self.tcp_bridge.command or ''
+        return self.ssh_command or ''
+
+    @property
+    def effective_args(self) -> list[str]:
+        if self.tcp_bridge and self.tcp_bridge.enabled:
+            return self.tcp_bridge.args
+        return self.ssh_args
+
+    @property
+    def effective_transport(self) -> str:
+        if self.connection_mode == 'tcp_bridge' and self.tcp_bridge and self.tcp_bridge.enabled:
+            return 'tcp_bridge'
+        return 'ssh'
+
+    @property
+    def is_tcp_bridge(self) -> bool:
+        return self.connection_mode == 'tcp_bridge' and self.tcp_bridge is not None and self.tcp_bridge.enabled
+
+    @property
+    def is_keyless(self) -> bool:
+        if self.requires_ssh_key is False:
+            return True
+        if self.tcp_bridge and self.tcp_bridge.requires_ssh_key is False:
+            return True
+        return False
 
 
 @dataclass(slots=True)
@@ -643,7 +890,7 @@ class SavedProfile:
 class PlanResult:
     mode: str
     meta: Meta
-    key: KeySummary
+    key: KeySummary | None
     domain: DomainSummary
     connection_profile: ConnectionProfile
     session: SessionSummary | None = None
@@ -660,14 +907,16 @@ class PlanResult:
             'ok': True,
             'mode': self.mode,
             'meta': self.meta.to_dict(),
-            'key': self.key.to_dict(),
             'domain': self.domain.to_dict(),
             'connectionProfile': self.connection_profile.to_dict(),
             'launch': {
-                'command': self.connection_profile.ssh_command,
-                'args': self.connection_profile.ssh_args,
+                'command': self.connection_profile.effective_command,
+                'args': self.connection_profile.effective_args,
+                'transport': self.connection_profile.effective_transport,
             },
         }
+        if self.key is not None:
+            payload['key'] = self.key.to_dict()
         if self.capabilities is not None:
             payload['capabilities'] = self.capabilities.to_dict()
         if self.discovery is not None:

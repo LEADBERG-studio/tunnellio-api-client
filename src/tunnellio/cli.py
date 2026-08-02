@@ -78,6 +78,7 @@ SECTION_FIELD_MAPS: dict[str, dict[str, str]] = {
         'use_discovery': 'useDiscovery',
         'session_strategy': 'sessionStrategy',
         'enable_pkce': 'enablePkce',
+        'transport': 'transport',
     },
     'connect': {
         'output': 'output',
@@ -97,6 +98,7 @@ SECTION_FIELD_MAPS: dict[str, dict[str, str]] = {
         'use_discovery': 'useDiscovery',
         'session_strategy': 'sessionStrategy',
         'enable_pkce': 'enablePkce',
+        'transport': 'transport',
         'run': 'run',
         'watch': 'watch',
         'name': 'name',
@@ -200,9 +202,10 @@ class TunnelUnhealthy(Exception):
 
 
 class TunnelProcessExited(Exception):
-    def __init__(self, return_code: int | None):
+    def __init__(self, return_code: int | None, transport: str = 'ssh'):
         self.return_code = return_code
-        super().__init__(f'SSH process exited with code {return_code}')
+        self.transport = transport
+        super().__init__(f'{transport} process exited with code {return_code}')
 
 
 
@@ -301,6 +304,8 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument('--use-discovery', action=argparse.BooleanOptionalAction, default=None)
         sub.add_argument('--session-strategy', default=None)
         sub.add_argument('--enable-pkce', action=argparse.BooleanOptionalAction, default=None)
+        sub.add_argument('--transport', choices=['ssh', 'tcp-bridge', 'auto'], default=None,
+                         help='Force transport: ssh, tcp-bridge, or auto (try ssh, fall back to tcp bridge)')
         if command_name == 'connect':
             sub.add_argument('--run', action=argparse.BooleanOptionalAction, default=None)
             sub.add_argument('--watch', action=argparse.BooleanOptionalAction, default=None)
@@ -446,6 +451,9 @@ def _write_runtime_connection_snapshot(
             'remoteHostname': result.connection_profile.remote_hostname,
             'localHost': result.connection_profile.local_host,
             'localPort': result.connection_profile.local_port,
+            'effectiveTransport': result.connection_profile.effective_transport,
+            'requiresSshKey': result.connection_profile.requires_ssh_key,
+            'tcpBridge': result.connection_profile.tcp_bridge.to_dict() if result.connection_profile.tcp_bridge else None,
         },
         'connection': result.to_dict(),
     }
@@ -572,14 +580,26 @@ def _close_runtime_session(
 
 
 def _announce_plan(logger: RuntimeLogger, result: PlanResult, health_url: str) -> None:
-    logger.log(f'Runtime name: {result.connection_profile.remote_hostname if False else ""}')
-    logger.log(f'Public URL: {result.connection_profile.public_url}')
+    cp = result.connection_profile
+    logger.log(f'Runtime name: {""}')
+    logger.log(f'Public URL: {cp.public_url}')
     logger.log(f'Health URL: {health_url}')
-    logger.log(
-        'SSH target: '
-        f'{result.connection_profile.ssh_user}@{result.connection_profile.ssh_host}:{result.connection_profile.ssh_port}'
-    )
-    logger.debug(f'SSH args: {result.connection_profile.ssh_args}')
+    if cp.is_tcp_bridge:
+        transport = 'tcp_bridge'
+        tb = cp.tcp_bridge
+        if tb:
+            logger.log(f'Transport: {transport} (no SSH key required)')
+            if tb.public_port is not None:
+                logger.log(f'Public TCP port: {tb.public_port}')
+            if tb.host:
+                logger.log(f'Bridge host: {tb.host}:{tb.control_port}')
+        logger.debug(f'Bridge args: {cp.effective_args}')
+    else:
+        logger.log(
+            'SSH target: '
+            f'{cp.ssh_user}@{cp.ssh_host}:{cp.ssh_port}'
+        )
+        logger.debug(f'SSH args: {cp.ssh_args}')
 
 
 def _signal_process(pid: int, *, force: bool) -> bool:
@@ -970,6 +990,8 @@ def _print_runtime_statuses(writer: OutputWriter, statuses: list[dict[str, Any]]
     for item in statuses:
         print(f"- {item.get('name', 'unnamed')}")
         print(f"  state: {item.get('state')}")
+        if item.get('transport'):
+            print(f"  transport: {item.get('transport')}")
         if item.get('pid') is not None:
             print(f"  pid: {item.get('pid')}")
         if item.get('publicUrl'):
@@ -1004,8 +1026,8 @@ def _run_once(
 ) -> dict[str, Any]:
     if stop_file.exists():
         stop_file.unlink()
-    if not result.connection_profile.ssh_args:
-        raise ValidationError('Connection profile did not contain sshArgs for execution.')
+    if not result.connection_profile.effective_args:
+        raise ValidationError('Connection profile did not contain executable args for tunnel launch.')
 
     health_url = _make_health_url(result.connection_profile.public_url, health_path)
     logger.log(f'Runtime name: {runtime_name}')
@@ -1020,10 +1042,14 @@ def _run_once(
     )
     result.session = active_session
 
-    expanded_args = [os.path.expanduser(arg) if '~' in arg else arg for arg in result.connection_profile.ssh_args]
-    logger.log('Launching SSH bridge')
+    expanded_args = [os.path.expanduser(arg) if '~' in arg else arg for arg in result.connection_profile.effective_args]
+    transport = result.connection_profile.effective_transport
+    if transport == 'tcp_bridge':
+        logger.log('Launching TCP bridge')
+    else:
+        logger.log('Launching SSH bridge')
     process = subprocess.Popen(expanded_args)
-    logger.log(f'SSH pid: {process.pid}')
+    logger.log(f'{transport} pid: {process.pid}')
 
     _write_status(
         status_path,
@@ -1035,6 +1061,7 @@ def _run_once(
             'healthUrl': health_url,
             'tlsBackend': client.tls_backend,
             'mode': 'connect',
+            'transport': result.connection_profile.effective_transport,
             'sessionAction': session_action,
             'stopFile': str(stop_file),
             'runtimeConfigFile': str(runtime_config_path),
@@ -1061,7 +1088,7 @@ def _run_once(
             if process.poll() is not None:
                 return_code = process.returncode
                 reason = 'process_exit'
-                raise TunnelProcessExited(return_code)
+                raise TunnelProcessExited(return_code, transport=result.connection_profile.effective_transport)
 
             ok, detail, tls_backend = _probe_health_url(
                 health_url,
@@ -1157,10 +1184,10 @@ def _run_once(
     except TunnelUnhealthy:
         logger.log('Health failure threshold reached; restarting tunnel')
     except TunnelProcessExited as exc:
-        logger.log(f'SSH process exited with code {exc.return_code}')
+        logger.log(f'{exc.transport} process exited with code {exc.return_code}')
     finally:
         if process.poll() is None:
-            logger.log('Stopping SSH bridge')
+            logger.log(f'Stopping {result.connection_profile.effective_transport} bridge')
             process.terminate()
             try:
                 process.wait(timeout=10)
@@ -1230,6 +1257,8 @@ def _run_watch_loop(
     restart_count = 0
     last_result: PlanResult | None = None
     last_execution: dict[str, Any] | None = None
+    original_connection_mode = options.connection_mode
+    auto_fell_back_to_tcp_bridge = False
 
     while True:
         if max_restarts and restart_count > max_restarts:
@@ -1263,6 +1292,23 @@ def _run_watch_loop(
         except TunnellioError as exc:
             restart_count += 1
             logger.log(f'Launch failed: {exc}')
+            if original_connection_mode == 'auto' and not auto_fell_back_to_tcp_bridge:
+                auto_fell_back_to_tcp_bridge = True
+                options.connection_mode = 'tcp_bridge'
+                logger.log('Auto-fallback: switching from SSH to TCP bridge')
+                _write_status(
+                    status_path,
+                    {
+                        'name': runtime_name,
+                        'state': 'restarting',
+                        'restartCount': restart_count,
+                        'reason': 'auto_fallback_to_tcp_bridge',
+                        'stopFile': str(stop_file),
+                        'runtimeConfigFile': str(runtime_config_path),
+                    },
+                )
+                _sleep_with_stop_check(restart_delay, stop_file)
+                continue
             _write_status(
                 status_path,
                 {
@@ -1284,6 +1330,12 @@ def _run_watch_loop(
 
         if execution.get('reason') in {'keyboard_interrupt', 'stop_file'}:
             return result, execution
+
+        if original_connection_mode == 'auto' and not auto_fell_back_to_tcp_bridge and result.connection_profile.effective_transport == 'ssh':
+            if execution.get('reason') == 'process_exit' and execution.get('returnCode') is not None and execution.get('healthyOnce') is False:
+                auto_fell_back_to_tcp_bridge = True
+                options.connection_mode = 'tcp_bridge'
+                logger.log('SSH exited quickly; auto-fallback to TCP bridge on next attempt')
 
         restart_count += 1
         logger.log(f'Restarting tunnel in {restart_delay}s (restart #{restart_count})')
@@ -1400,6 +1452,15 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
     if command == 'connect' and settings.get('watch') and not settings.get('run'):
         raise ValidationError('--watch requires run=true in config.')
 
+    transport_preference = settings.get('transport')
+    connection_mode = settings.get('connectionMode')
+    if transport_preference == 'tcp-bridge' and not connection_mode:
+        connection_mode = 'tcp_bridge'
+    elif transport_preference == 'tcp-bridge':
+        connection_mode = 'tcp_bridge'
+    elif transport_preference == 'auto' and not connection_mode:
+        connection_mode = 'auto'
+
     planner = Planner(client, runtime)
     options = PlanOptions(
         key_selector=settings.get('keySelector'),
@@ -1413,7 +1474,7 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
         save_profile=bool(settings.get('saveProfile')),
         mode=command,
         requested_auth_mode=settings.get('requestedAuthMode'),
-        connection_mode=settings.get('connectionMode'),
+        connection_mode=connection_mode,
         oauth_client_policy=settings.get('oauthClientPolicy'),
         runtime_name=settings.get('runtimeName') or settings.get('name'),
         use_discovery=bool(settings.get('useDiscovery', True)),

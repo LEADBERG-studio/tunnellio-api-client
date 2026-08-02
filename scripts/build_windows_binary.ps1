@@ -30,11 +30,12 @@ if ($Clean) {
 if (-not $SkipTests) {
     & $Python -m compileall src tests local_e2e_tests.py
 
-    $ManualTestCode = @'
+    $TestScript = Join-Path $env:TEMP "tunnellio-build-tests-$(Get-Random).py"
+    $TestCode = @"
 import sys
 from pathlib import Path
 
-sys.path[:0] = ["src", "."]
+sys.path[:0] = ['src', '.']
 
 import tests.test_cli as cli_tests
 import tests.test_config as config_tests
@@ -48,20 +49,25 @@ cli_tests.test_status_can_filter_by_name()
 cli_tests.test_show_config_can_target_name()
 cli_tests.test_stop_all_defaults()
 cli_tests.test_apply_explicit_overrides_updates_connect_section()
-cli_tests.test_prepare_execution_config_updates_default_config_first(Path("test-artifacts/build-script-default"))
-cli_tests.test_prepare_execution_config_keeps_client_config_when_overwrite_disabled(Path("test-artifacts/build-script-client"))
+cli_tests.test_prepare_execution_config_updates_default_config_first(Path('test-artifacts/build-script-default'))
+cli_tests.test_prepare_execution_config_keeps_client_config_when_overwrite_disabled(Path('test-artifacts/build-script-client'))
 cli_tests.test_connect_parser_accepts_new_server_contract_flags()
 cli_tests.test_apply_explicit_overrides_updates_new_contract_fields()
-cli_tests.test_runtime_connection_snapshot_contains_auth_and_runtime_contracts(Path("test-artifacts/build-script-snapshot"))
+cli_tests.test_connect_parser_accepts_transport_flag()
+cli_tests.test_apply_explicit_overrides_maps_transport_to_config()
+cli_tests.test_runtime_connection_snapshot_contains_auth_and_runtime_contracts(Path('test-artifacts/build-script-snapshot'))
 config_tests.test_build_launch_config_template_contains_all_sections()
 config_tests.test_normalize_launch_config_backfills_defaults()
-config_tests.test_save_launch_config_persists_default_path_metadata(Path("test-artifacts/build-script-save"))
+config_tests.test_save_launch_config_persists_default_path_metadata(Path('test-artifacts/build-script-save'))
 planner_tests.test_split_selector()
 planner_tests.test_split_selector_rejects_invalid_value()
 planner_tests.test_build_launch_payload_for_new_domain()
 planner_tests.test_existing_unbound_domain_requires_key()
 planner_tests.test_build_plan_returns_session_and_auth_contracts()
 planner_tests.test_build_plan_rejects_requested_auth_mode_mismatch()
+planner_tests.test_tcp_bridge_new_domain_omits_key_payload()
+planner_tests.test_tcp_bridge_build_plan_returns_keyless_profile()
+planner_tests.test_tcp_bridge_session_open_payload_omits_key_id_when_keyless()
 client_tests.test_build_ssl_context_insecure()
 client_tests.test_build_ssl_context_windows_uses_truststore_when_available()
 client_tests.test_build_ssl_context_windows_falls_back_when_missing()
@@ -75,13 +81,17 @@ client_tests.test_heartbeat_session_includes_resume_token()
 client_tests.test_close_session_includes_resume_token()
 oauth_tests.test_generate_pkce_pair()
 oauth_tests.test_build_authorize_url()
-oauth_tests.test_token_record_from_response_and_roundtrip(Path("test-artifacts/build-script-oauth-record"))
+oauth_tests.test_token_record_from_response_and_roundtrip(Path('test-artifacts/build-script-oauth-record'))
 oauth_tests.test_token_record_requires_access_token()
 oauth_tests.test_build_token_storage_name()
-print("manual tests passed")
-'@
-
-    & $Python -c $ManualTestCode
+print('manual tests passed')
+"@
+    Set-Content -Path $TestScript -Value $TestCode -Encoding UTF8
+    try {
+        & $Python $TestScript
+    } finally {
+        Remove-Item $TestScript -ErrorAction SilentlyContinue
+    }
 }
 
 & $Python -m PyInstaller --clean tunnellio.spec

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tunnellio"
-version = "0.1.7"
-description = "CLI/helper for planning and launching Tunnellio SSH tunnels"
+version = "0.2.0"
+description = "CLI/helper for planning and launching Tunnellio tunnels (SSH and TCP bridge)"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [

@@ -42,8 +42,21 @@ class DummyClient:
                 'maxLifetimeDays': 365,
                 'defaultLifetimeDays': 30,
                 'supportedAuthModes': ['legacy', 'oauth', 'dual'],
-                'supportedConnectionModes': ['cloud_proxy'],
+                'supportedConnectionModes': ['cloud_proxy', 'tcp_bridge', 'auto'],
                 'defaultConnectionMode': 'cloud_proxy',
+                'supportsKeylessTcpBridge': True,
+                'tcpBridge': {
+                    'enabled': True,
+                    'protocol': 'bore',
+                    'host': 'tunnel.example.net',
+                    'controlPort': 7835,
+                    'publicBaseDomain': 'tunnel.example.net',
+                    'portRange': {'min': 51000, 'max': 51999},
+                    'supportsPreconfiguredSubdomains': True,
+                    'supportsGeneratedSubdomains': True,
+                    'requiresSshKey': False,
+                    'authRequired': False,
+                },
                 'oauthProxy': {
                     'enabled': True,
                     'allowTemporaryUrl': True,
@@ -153,6 +166,66 @@ class DummyClient:
         }
 
 
+class TcpBridgeDummyClient(DummyClient):
+    """Client that returns a tcp_bridge connection profile without a key."""
+
+    def get_launch_spec(self, payload):
+        return {
+            'domain': {
+                'id': 3,
+                'hostname': 'demo-app',
+                'fqdn': 'demo-app.tunnellio.site',
+                'publicUrl': 'https://demo-app.tunnellio.site',
+                'keyId': None,
+                'localPort': 3000,
+                'note': '',
+                'createdAt': '2026-07-22T18:25:00+00:00',
+                'expiresAt': None,
+                'lastUsedAt': None,
+                'mode': 'persistent',
+                'status': 'active',
+                'authMode': 'legacy',
+                'connectionMode': 'tcp_bridge',
+            },
+            'connectionProfile': {
+                'connectionMode': 'tcp_bridge',
+                'requiresSshKey': False,
+                'publicUrl': 'https://demo-app.tunnellio.site',
+                'localHost': '127.0.0.1',
+                'localPort': 3000,
+                'remoteHostname': 'demo-app',
+                'tcpBridge': {
+                    'enabled': True,
+                    'protocol': 'bore',
+                    'authRequired': False,
+                    'requiresSshKey': False,
+                    'host': 'tunnel.example.net',
+                    'controlPort': 7835,
+                    'publicPort': 51000,
+                    'publicBaseDomain': 'tunnel.example.net',
+                    'hostname': 'demo-app',
+                    'publicUrl': 'https://demo-app.tunnellio.site',
+                    'localHost': '127.0.0.1',
+                    'localPort': 3000,
+                    'preconfiguredSubdomain': True,
+                    'generatedSubdomain': False,
+                    'token': None,
+                    'command': 'tunnellio-bridge connect --host tunnel.example.net --control-port 7835 --hostname demo-app --local-host 127.0.0.1 --local-port 3000',
+                    'args': ['tunnellio-bridge', 'connect', '--host', 'tunnel.example.net', '--control-port', '7835', '--hostname', 'demo-app', '--local-host', '127.0.0.1', '--local-port', '3000'],
+                },
+            },
+            'session': {
+                'id': 'sess_tcp_456',
+                'hostname': 'demo-app',
+                'status': 'active',
+                'deleteOnDisconnect': False,
+                'createdAt': '2026-07-22T18:25:00+00:00',
+                'resumeToken': 'resume_tcp_456',
+                'connectionMode': 'tcp_bridge',
+            },
+        }
+
+
 class DummyConfig:
     profiles_dir = Path('.')
 
@@ -253,3 +326,53 @@ def test_build_plan_rejects_requested_auth_mode_mismatch() -> None:
         assert exc.details['actualAuthMode'] == 'oauth'
     else:
         raise AssertionError('RequestedAuthModeMismatchError was not raised')
+
+
+def test_tcp_bridge_new_domain_omits_key_payload() -> None:
+    planner = Planner(DummyClient(), DummyConfig())
+    capabilities = Capabilities.from_api(DummyClient().fetch_capabilities())
+    options = PlanOptions(
+        domain_selector='new:demo-bridge',
+        local_host='127.0.0.1',
+        local_port=3000,
+        connection_mode='tcp_bridge',
+    )
+    payload = planner.build_launch_payload(options, capabilities)
+    assert payload['connectionMode'] == 'tcp_bridge'
+    assert payload['domain']['connectionMode'] == 'tcp_bridge'
+    assert payload['key'] is None
+
+
+def test_tcp_bridge_build_plan_returns_keyless_profile() -> None:
+    planner = Planner(TcpBridgeDummyClient(), DummyConfig())
+    result = planner.build_plan(
+        PlanOptions(
+            domain_selector='new:demo-app',
+            local_port=3000,
+            connection_mode='tcp_bridge',
+        )
+    )
+    assert result.key is None
+    assert result.connection_profile.is_tcp_bridge is True
+    assert result.connection_profile.is_keyless is True
+    assert result.connection_profile.effective_transport == 'tcp_bridge'
+    assert result.connection_profile.tcp_bridge is not None
+    assert result.connection_profile.tcp_bridge.public_port == 51000
+    assert result.connection_profile.effective_args[0] == 'tunnellio-bridge'
+    payload = result.to_dict()
+    assert 'key' not in payload
+    assert payload['launch']['transport'] == 'tcp_bridge'
+    assert payload['launch']['args'][0] == 'tunnellio-bridge'
+
+
+def test_tcp_bridge_session_open_payload_omits_key_id_when_keyless() -> None:
+    planner = Planner(TcpBridgeDummyClient(), DummyConfig())
+    result = planner.build_plan(
+        PlanOptions(
+            domain_selector='new:demo-app',
+            local_port=3000,
+            connection_mode='tcp_bridge',
+        )
+    )
+    assert 'keyId' not in result.session_open_payload
+    assert result.session_open_payload['connectionMode'] == 'tcp_bridge'

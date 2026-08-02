@@ -127,6 +127,7 @@ def build_launch_config_template(state_dir: Path | None = None) -> dict[str, Any
             'useDiscovery': True,
             'sessionStrategy': None,
             'enablePkce': False,
+            'transport': None,
         },
         'connect': {
             'output': 'text',
@@ -146,6 +147,7 @@ def build_launch_config_template(state_dir: Path | None = None) -> dict[str, Any
             'useDiscovery': True,
             'sessionStrategy': None,
             'enablePkce': False,
+            'transport': None,
             'run': True,
             'watch': True,
             'name': None,

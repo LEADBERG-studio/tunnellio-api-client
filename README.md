@@ -26,6 +26,9 @@
 - discovery через `POST /v1/meta`
 - capability-aware planning через `POST /v1/capabilities`
 - orchestration через `POST /v1/launch-spec`
+- **TCP bridge transport** (`connectionMode = tcp_bridge`) — keyless альтернатива reverse SSH
+- **`--transport` флаг** (`ssh`, `tcp-bridge`, `auto`) для явного выбора транспорта
+- **auto-fallback** с SSH на TCP bridge при быстром отказе SSH
 - запуск SSH через `connect --run`
 - supervised mode через `connect --run --watch`
 - health-check публичного URL
@@ -50,7 +53,7 @@
 - CLI-команды `oauth-login`, `oauth-refresh`, `oauth-introspect`
 - локальное хранение OAuth token record с `accessToken`, `refreshToken`, `scope`, `issuer`, endpoint-ами и привязкой к client/domain
 - сохранение старого `refreshToken`, если refresh-response не вернул новый
-- config-поля `requestedAuthMode`, `connectionMode`, `oauthClientPolicy`, `runtimeName`, `useDiscovery`, `sessionStrategy`, `enablePkce`
+- config-поля `requestedAuthMode`, `connectionMode`, `oauthClientPolicy`, `runtimeName`, `useDiscovery`, `sessionStrategy`, `enablePkce`, `transport`
 - сервер остаётся источником истины по итоговому `authMode` / `connectionMode`; клиент проверяет и отражает фактический результат
 - локальный e2e runner
 - Windows TLS через `windows-truststore`
@@ -109,6 +112,22 @@
 ```
 4. считать из ответа фактический домен / public URL / connection data;
 5. дальше использовать то же имя для `status --name` и `stop --name`.
+
+## TCP bridge: туннель без SSH-ключей
+TCP bridge — это альтернативный транспорт, который работает без reverse SSH и без SSH-ключей.
+Он удобен для сред, где исходящий SSH на 22/2222 закрыт или reverse SSH-сессия нестабильна.
+
+### Запуск с явным TCP bridge
+```powershell
+.\tunnellio.exe --token YOUR_TOKEN connect --domain new:demo-app --local-port 3000 --transport tcp-bridge --run --watch --name demo-bridge
+```
+
+### Запуск с auto-fallback (сначала SSH, потом TCP bridge)
+```powershell
+.\tunnellio.exe --token YOUR_TOKEN connect --domain new:demo-app --local-port 3000 --transport auto --run --watch --name demo-auto
+```
+
+В логах видно фактический транспорт и публичный TCP port. В `status` и `show-config` транспорт тоже отражается.
 
 ## Готовый бинарник: базовое использование
 ### Seed default config и запуск supervised tunnel
@@ -179,6 +198,7 @@
 - `docs/README.md`
 - `docs/BUILD_WINDOWS.md`
 - `docs/CONFIGS.md`
+- `docs/TCP_BRIDGE.md`
 - `docs/INTEGRATION.md`
 - `docs/OPERATIONS.md`
 - `docs/TESTING.md`

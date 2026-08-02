@@ -199,6 +199,38 @@ def test_apply_explicit_overrides_updates_new_contract_fields() -> None:
     assert updated['connect']['enablePkce'] is True
 
 
+def test_connect_parser_accepts_transport_flag() -> None:
+    parser = build_parser()
+    args = parser.parse_args(['connect', '--transport', 'tcp-bridge'])
+    assert args.transport == 'tcp-bridge'
+
+    args_ssh = parser.parse_args(['connect', '--transport', 'ssh'])
+    assert args_ssh.transport == 'ssh'
+
+    args_auto = parser.parse_args(['connect', '--transport', 'auto'])
+    assert args_auto.transport == 'auto'
+
+
+def test_apply_explicit_overrides_maps_transport_to_config() -> None:
+    parser = build_parser()
+    args = parser.parse_args([
+        'connect',
+        '--transport', 'tcp-bridge',
+        '--domain', 'new:demo-bridge',
+    ])
+    base = {
+        'command': 'connect',
+        'global': {},
+        'connect': {
+            'transport': None,
+            'domainSelector': None,
+        },
+    }
+    updated = _apply_explicit_overrides(base, args)
+    assert updated['connect']['transport'] == 'tcp-bridge'
+    assert updated['connect']['domainSelector'] == 'new:demo-bridge'
+
+
 def test_oauth_login_parser_accepts_required_flags() -> None:
     parser = build_parser()
     args = parser.parse_args([
