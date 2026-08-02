@@ -25,15 +25,19 @@ class OutputWriter:
 
         cp = result.connection_profile
         print('Plan created successfully.')
-        print(f'API: {result.meta.api_base_url} ({result.meta.api_version})')
+        if result.meta is not None:
+            print(f'API: {result.meta.api_base_url} ({result.meta.api_version})')
         if result.key is not None:
             print(f'Key: {result.key.name} (id={result.key.id})')
         else:
-            print('Key: (not required for tcp_bridge)')
-        print(f'Domain: {result.domain.hostname}')
+            print('Key: (not required)')
+        if result.domain is not None:
+            print(f'Domain: {result.domain.hostname}')
         print(f'Public URL: {cp.public_url}')
         if cp.is_tcp_bridge:
             print(f'Transport: tcp_bridge (no SSH key required)')
+            if cp.is_tokenless:
+                print('Tokenless: no API token required')
             tb = cp.tcp_bridge
             if tb:
                 if tb.public_port is not None:

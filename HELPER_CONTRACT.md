@@ -135,6 +135,32 @@ The `key` field is absent when the connection is keyless. Callers should check
 `connectionProfile.requiresSshKey` / `connectionProfile.tcpBridge.enabled` or
 `launch.transport` before assuming SSH.
 
+### Tokenless keyless bridge (`bridge` command)
+When using the `bridge` command, no API token is required. The client calls
+`POST /v1/tcp-bridge/launch` without Bearer auth. The response omits `meta`,
+`key`, `domain`, `capabilities`, `discovery`, and `auth` — only `connectionProfile`
+and `launch` are returned:
+```json
+{
+  "ok": true,
+  "mode": "bridge",
+  "connectionProfile": {
+    "connectionMode": "tcp_bridge",
+    "requiresSshKey": false,
+    "requiresApiToken": false,
+    "publicUrl": "https://my-app.tunnellio.site",
+    "localHost": "127.0.0.1",
+    "localPort": 3000,
+    "tcpBridge": { ... }
+  },
+  "launch": {
+    "command": "tunnellio-bridge connect ...",
+    "args": ["tunnellio-bridge", "connect", ...],
+    "transport": "tcp_bridge"
+  }
+}
+```
+
 ## Error contract
 
 Example:

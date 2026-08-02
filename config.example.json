@@ -124,6 +124,27 @@
     "introspectUrl": null,
     "useDiscovery": true
   },
+  "bridge": {
+    "output": "text",
+    "domainSelector": null,
+    "note": null,
+    "localHost": "127.0.0.1",
+    "localPort": 3000,
+    "saveProfile": false,
+    "runtimeName": null,
+    "run": true,
+    "watch": true,
+    "name": null,
+    "healthPath": "/",
+    "healthInterval": 15,
+    "healthTimeout": 10,
+    "healthFailures": 3,
+    "restartDelay": 5,
+    "maxRestarts": 0,
+    "logFile": "~/.tunnellio/logs/tunnel.log",
+    "statusFile": null,
+    "stopFile": null
+  },
   "paths": {
     "defaultConfig": "~/.tunnellio/default-launch.json",
     "clientConfigsDir": "~/.tunnellio/configs",

@@ -37,6 +37,7 @@ COMMAND_TO_SECTION = {
     'capabilities': 'capabilities',
     'plan': 'plan',
     'connect': 'connect',
+    'bridge': 'bridge',
     'status': 'status',
     'stop': 'stop',
     'show-config': 'showConfig',
@@ -99,6 +100,27 @@ SECTION_FIELD_MAPS: dict[str, dict[str, str]] = {
         'session_strategy': 'sessionStrategy',
         'enable_pkce': 'enablePkce',
         'transport': 'transport',
+        'run': 'run',
+        'watch': 'watch',
+        'name': 'name',
+        'health_path': 'healthPath',
+        'health_interval': 'healthInterval',
+        'health_timeout': 'healthTimeout',
+        'health_failures': 'healthFailures',
+        'restart_delay': 'restartDelay',
+        'max_restarts': 'maxRestarts',
+        'log_file': 'logFile',
+        'status_file': 'statusFile',
+        'stop_file': 'stopFile',
+    },
+    'bridge': {
+        'output': 'output',
+        'domain_selector': 'domainSelector',
+        'note': 'note',
+        'local_host': 'localHost',
+        'local_port': 'localPort',
+        'save_profile': 'saveProfile',
+        'runtime_name': 'runtimeName',
         'run': 'run',
         'watch': 'watch',
         'name': 'name',
@@ -320,6 +342,29 @@ def build_parser() -> argparse.ArgumentParser:
             sub.add_argument('--status-file', default=None)
             sub.add_argument('--stop-file', default=None)
 
+    bridge_parser = subparsers.add_parser('bridge',
+        help='Launch a keyless TCP bridge tunnel (no API token, no SSH key)')
+    bridge_parser.add_argument('--output', choices=['json', 'text'], default=None)
+    bridge_parser.add_argument('--domain', dest='domain_selector', default=None,
+        help='Optional hostname (new:my-app or bare my-app). Omit for a generated ephemeral subdomain.')
+    bridge_parser.add_argument('--note', default=None)
+    bridge_parser.add_argument('--local-host', default=None)
+    bridge_parser.add_argument('--local-port', type=int, default=None)
+    bridge_parser.add_argument('--save-profile', action=argparse.BooleanOptionalAction, default=None)
+    bridge_parser.add_argument('--runtime-name', default=None)
+    bridge_parser.add_argument('--run', action=argparse.BooleanOptionalAction, default=None)
+    bridge_parser.add_argument('--watch', action=argparse.BooleanOptionalAction, default=None)
+    bridge_parser.add_argument('--name', default=None)
+    bridge_parser.add_argument('--health-path', default=None)
+    bridge_parser.add_argument('--health-interval', type=int, default=None)
+    bridge_parser.add_argument('--health-timeout', type=int, default=None)
+    bridge_parser.add_argument('--health-failures', type=int, default=None)
+    bridge_parser.add_argument('--restart-delay', type=int, default=None)
+    bridge_parser.add_argument('--max-restarts', type=int, default=None)
+    bridge_parser.add_argument('--log-file', default=None)
+    bridge_parser.add_argument('--status-file', default=None)
+    bridge_parser.add_argument('--stop-file', default=None)
+
     return parser
 
 
@@ -350,7 +395,7 @@ def _generate_runtime_name(domain_selector: str | None, local_port: int | None) 
 
 
 def _ensure_connect_name(config_payload: dict[str, Any]) -> dict[str, Any]:
-    if config_payload.get('command') != 'connect':
+    if config_payload.get('command') not in {'connect', 'bridge'}:
         return config_payload
     candidate = copy.deepcopy(config_payload)
     connect = candidate.setdefault('connect', {})
@@ -1372,7 +1417,7 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
         base_url=global_config.get('baseUrl'),
         state_dir=global_config.get('stateDir'),
         insecure_tls=global_config.get('insecureTls'),
-        require_token=command not in {'status', 'stop', 'show-config'},
+        require_token=command not in {'status', 'stop', 'show-config', 'bridge'},
     )
 
     if command == 'status':
@@ -1449,8 +1494,10 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
         return int(ExitCode.SUCCESS)
 
     settings = dict(config_payload.get(section_key, {}))
-    if command == 'connect' and settings.get('watch') and not settings.get('run'):
+    if command in {'connect', 'bridge'} and settings.get('watch') and not settings.get('run'):
         raise ValidationError('--watch requires run=true in config.')
+
+    is_bridge_command = command == 'bridge'
 
     transport_preference = settings.get('transport')
     connection_mode = settings.get('connectionMode')
@@ -1460,6 +1507,8 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
         connection_mode = 'tcp_bridge'
     elif transport_preference == 'auto' and not connection_mode:
         connection_mode = 'auto'
+    if is_bridge_command:
+        connection_mode = 'tcp_bridge'
 
     planner = Planner(client, runtime)
     options = PlanOptions(
@@ -1482,9 +1531,12 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
         enable_pkce=bool(settings.get('enablePkce')),
     )
     log_progress(verbose, f'Building {command} plan')
-    result = planner.build_plan(options)
+    if is_bridge_command:
+        result = planner.build_keyless_bridge_plan(options)
+    else:
+        result = planner.build_plan(options)
 
-    if command == 'connect' and settings.get('run'):
+    if command in {'connect', 'bridge'} and settings.get('run'):
         runtime_name = str(settings.get('runtimeName') or settings.get('name') or _generate_runtime_name(settings.get('domainSelector'), settings.get('localPort')))
         status_path_default, stop_path_default, runtime_config_path_default = _default_runtime_paths(runtime.runtime_dir, runtime_name)
         status_path = _expand_optional_path(settings.get('statusFile')) or status_path_default
@@ -1501,23 +1553,39 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
         logger = RuntimeLogger(verbose=verbose, log_file=settings.get('logFile'))
         if settings.get('watch'):
             logger.log('Starting supervised tunnel mode')
-            result, execution = _run_watch_loop(
-                planner,
-                client,
-                options,
-                logger=logger,
-                insecure_tls=bool(runtime.insecure_tls),
-                runtime_name=runtime_name,
-                runtime_config_path=runtime_config_path,
-                health_path=str(settings.get('healthPath') or '/'),
-                health_interval=int(settings.get('healthInterval') or 15),
-                health_timeout=int(settings.get('healthTimeout') or 10),
-                health_failures=int(settings.get('healthFailures') or 3),
-                restart_delay=int(settings.get('restartDelay') or 5),
-                max_restarts=int(settings.get('maxRestarts') or 0),
-                status_path=status_path,
-                stop_file=stop_file,
-            )
+            if is_bridge_command:
+                execution = _run_once(
+                    client,
+                    result,
+                    logger=logger,
+                    insecure_tls=bool(runtime.insecure_tls),
+                    runtime_name=runtime_name,
+                    runtime_config_path=runtime_config_path,
+                    health_path=str(settings.get('healthPath') or '/'),
+                    health_interval=int(settings.get('healthInterval') or 15),
+                    health_timeout=int(settings.get('healthTimeout') or 10),
+                    health_failures=int(settings.get('healthFailures') or 3),
+                    status_path=status_path,
+                    stop_file=stop_file,
+                )
+            else:
+                result, execution = _run_watch_loop(
+                    planner,
+                    client,
+                    options,
+                    logger=logger,
+                    insecure_tls=bool(runtime.insecure_tls),
+                    runtime_name=runtime_name,
+                    runtime_config_path=runtime_config_path,
+                    health_path=str(settings.get('healthPath') or '/'),
+                    health_interval=int(settings.get('healthInterval') or 15),
+                    health_timeout=int(settings.get('healthTimeout') or 10),
+                    health_failures=int(settings.get('healthFailures') or 3),
+                    restart_delay=int(settings.get('restartDelay') or 5),
+                    max_restarts=int(settings.get('maxRestarts') or 0),
+                    status_path=status_path,
+                    stop_file=stop_file,
+                )
         else:
             logger.log('Starting one-shot tunnel mode')
             execution = _run_once(

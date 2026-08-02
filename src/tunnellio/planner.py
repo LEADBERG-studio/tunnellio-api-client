@@ -86,6 +86,50 @@ class Planner:
             runtime=runtime_contract,
         )
 
+    def build_keyless_bridge_plan(self, options: PlanOptions) -> PlanResult:
+        payload: dict[str, Any] = {
+            'localHost': options.local_host,
+            'localPort': options.local_port,
+        }
+        if options.domain_selector:
+            domain_mode, domain_value = _split_selector(
+                options.domain_selector,
+                label='domain',
+                allow_bare_random=True,
+            )
+            if domain_mode == 'new' and domain_value:
+                payload['hostname'] = domain_value
+            elif domain_mode in {'existing', 'id', 'existing-id'} and domain_value:
+                payload['hostname'] = domain_value
+        if options.note:
+            payload['note'] = options.note
+
+        data = self._client.get_public_tcp_bridge_launch(payload)
+        connection_profile = ConnectionProfile.from_api(data.get('connectionProfile', data))
+        domain = DomainSummary.from_api(data['domain']) if data.get('domain') else None
+        session = SessionSummary.from_api(data['session']) if data.get('session') else None
+        runtime_contract = self.build_runtime_contract(options, connection_profile, session)
+
+        saved_profile = None
+        if options.save_profile and domain is not None:
+            saved_profile = self._save_profile(None, None, domain, connection_profile, session)
+
+        return PlanResult(
+            mode=options.mode,
+            meta=None,
+            key=None,
+            domain=domain,
+            connection_profile=connection_profile,
+            session=session,
+            saved_profile=saved_profile,
+            capabilities=None,
+            discovery=None,
+            protected_resource=None,
+            session_open_payload=None,
+            auth=None,
+            runtime=runtime_contract,
+        )
+
     def build_launch_payload(self, options: PlanOptions, capabilities: Capabilities | None = None) -> dict[str, Any]:
         capabilities = capabilities or Capabilities.from_api(self._client.fetch_capabilities())
         if not options.domain_selector:

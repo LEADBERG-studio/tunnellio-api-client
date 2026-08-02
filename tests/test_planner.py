@@ -226,6 +226,43 @@ class TcpBridgeDummyClient(DummyClient):
         }
 
 
+class KeylessBridgeDummyClient(DummyClient):
+    """Client that simulates the public /v1/tcp-bridge/launch endpoint (no token, no key)."""
+
+    def get_public_tcp_bridge_launch(self, payload):
+        hostname = payload.get('hostname', 'gen-abc123')
+        return {
+            'connectionProfile': {
+                'connectionMode': 'tcp_bridge',
+                'requiresSshKey': False,
+                'requiresApiToken': False,
+                'publicUrl': f'https://{hostname}.tunnellio.site',
+                'localHost': payload.get('localHost', '127.0.0.1'),
+                'localPort': payload.get('localPort', 3000),
+                'tcpBridge': {
+                    'enabled': True,
+                    'protocol': 'bore',
+                    'authRequired': False,
+                    'requiresSshKey': False,
+                    'requiresApiToken': False,
+                    'host': 'tunnel.example.net',
+                    'controlPort': 7835,
+                    'publicPort': 51001,
+                    'publicBaseDomain': 'tunnel.example.net',
+                    'hostname': hostname,
+                    'publicUrl': f'https://{hostname}.tunnellio.site',
+                    'localHost': payload.get('localHost', '127.0.0.1'),
+                    'localPort': payload.get('localPort', 3000),
+                    'preconfiguredSubdomain': True,
+                    'generatedSubdomain': False,
+                    'token': None,
+                    'command': f'tunnellio-bridge connect --host tunnel.example.net --control-port 7835 --hostname {hostname} --local-host 127.0.0.1 --local-port 3000',
+                    'args': ['tunnellio-bridge', 'connect', '--host', 'tunnel.example.net', '--control-port', '7835', '--hostname', hostname, '--local-host', '127.0.0.1', '--local-port', '3000'],
+                },
+            },
+        }
+
+
 class DummyConfig:
     profiles_dir = Path('.')
 
@@ -376,3 +413,39 @@ def test_tcp_bridge_session_open_payload_omits_key_id_when_keyless() -> None:
     )
     assert 'keyId' not in result.session_open_payload
     assert result.session_open_payload['connectionMode'] == 'tcp_bridge'
+
+
+def test_keyless_bridge_plan_calls_public_endpoint() -> None:
+    planner = Planner(KeylessBridgeDummyClient(), DummyConfig())
+    result = planner.build_keyless_bridge_plan(
+        PlanOptions(
+            domain_selector='new:my-bridge',
+            local_port=3000,
+            mode='bridge',
+        )
+    )
+    assert result.meta is None
+    assert result.key is None
+    assert result.capabilities is None
+    assert result.connection_profile.is_tcp_bridge is True
+    assert result.connection_profile.is_keyless is True
+    assert result.connection_profile.is_tokenless is True
+    assert result.connection_profile.effective_args[0] == 'tunnellio-bridge'
+    payload = result.to_dict()
+    assert 'meta' not in payload
+    assert 'key' not in payload
+    assert payload['launch']['transport'] == 'tcp_bridge'
+
+
+def test_keyless_bridge_plan_with_generated_subdomain() -> None:
+    planner = Planner(KeylessBridgeDummyClient(), DummyConfig())
+    result = planner.build_keyless_bridge_plan(
+        PlanOptions(
+            local_port=8080,
+            mode='bridge',
+        )
+    )
+    assert result.connection_profile.is_tokenless is True
+    assert result.connection_profile.public_url is not None
+    assert result.connection_profile.tcp_bridge is not None
+    assert result.connection_profile.tcp_bridge.public_port == 51001

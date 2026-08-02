@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0
+- Added `bridge` CLI command for one-shot keyless TCP bridge tunnels — no API token, no SSH key required
+- Added public keyless endpoint `POST /v1/tcp-bridge/launch` (no Bearer auth) in ApiClient
+- Added `Planner.build_keyless_bridge_plan()` that skips meta/capabilities/launch-spec and calls the public endpoint directly
+- Added `requiresApiToken` field to `ConnectionProfile` and `TcpBridgeProfile`
+- Added `is_tokenless` property to `ConnectionProfile`
+- Made `PlanResult.meta` and `PlanResult.domain` optional (None for keyless bridge flow)
+- Made `bridge` command exempt from the API token requirement
+- Updated config template with `bridge` section
+- Updated output writer to handle None meta/domain in plan display
+- Added tests for keyless bridge plan flow and bridge CLI parser
+
 ## 0.2.0
 - Added TCP bridge transport (`connectionMode = tcp_bridge`) as a keyless alternative to reverse SSH
 - Added `--transport` CLI flag (`ssh`, `tcp-bridge`, `auto`) for explicit transport selection

@@ -690,6 +690,7 @@ class TcpBridgeProfile:
     protocol: str | None = None
     auth_required: bool | None = None
     requires_ssh_key: bool | None = None
+    requires_api_token: bool | None = None
     host: str | None = None
     control_port: int | None = None
     public_port: int | None = None
@@ -713,6 +714,7 @@ class TcpBridgeProfile:
             protocol=_str_or_none(payload.get('protocol')),
             auth_required=_bool_or_none(payload.get('authRequired')),
             requires_ssh_key=_bool_or_none(payload.get('requiresSshKey')),
+            requires_api_token=_bool_or_none(payload.get('requiresApiToken')),
             host=_str_or_none(payload.get('host')),
             control_port=_int_or_none(payload.get('controlPort')),
             public_port=_int_or_none(payload.get('publicPort')),
@@ -736,6 +738,8 @@ class TcpBridgeProfile:
             payload['authRequired'] = self.auth_required
         if self.requires_ssh_key is not None:
             payload['requiresSshKey'] = self.requires_ssh_key
+        if self.requires_api_token is not None:
+            payload['requiresApiToken'] = self.requires_api_token
         if self.host is not None:
             payload['host'] = self.host
         if self.control_port is not None:
@@ -786,6 +790,7 @@ class ConnectionProfile:
     introspect_url: str | None = None
     token_verification: str | None = None
     requires_ssh_key: bool | None = None
+    requires_api_token: bool | None = None
     tcp_bridge: TcpBridgeProfile | None = None
 
     @classmethod
@@ -810,6 +815,7 @@ class ConnectionProfile:
             introspect_url=_str_or_none(payload.get('introspectUrl')),
             token_verification=_str_or_none(payload.get('tokenVerification')),
             requires_ssh_key=_bool_or_none(payload.get('requiresSshKey')),
+            requires_api_token=_bool_or_none(payload.get('requiresApiToken')),
             tcp_bridge=TcpBridgeProfile.from_api(payload.get('tcpBridge')),
         )
 
@@ -835,6 +841,7 @@ class ConnectionProfile:
             'introspectUrl': self.introspect_url,
             'tokenVerification': self.token_verification,
             'requiresSshKey': self.requires_ssh_key,
+            'requiresApiToken': self.requires_api_token,
         }.items():
             if value is None or value == []:
                 continue
@@ -873,6 +880,14 @@ class ConnectionProfile:
             return True
         return False
 
+    @property
+    def is_tokenless(self) -> bool:
+        if self.requires_api_token is False:
+            return True
+        if self.tcp_bridge and self.tcp_bridge.requires_api_token is False:
+            return True
+        return False
+
 
 @dataclass(slots=True)
 class SavedProfile:
@@ -889,9 +904,9 @@ class SavedProfile:
 @dataclass(slots=True)
 class PlanResult:
     mode: str
-    meta: Meta
+    meta: Meta | None
     key: KeySummary | None
-    domain: DomainSummary
+    domain: DomainSummary | None
     connection_profile: ConnectionProfile
     session: SessionSummary | None = None
     saved_profile: SavedProfile | None = None
@@ -906,8 +921,6 @@ class PlanResult:
         payload: dict[str, Any] = {
             'ok': True,
             'mode': self.mode,
-            'meta': self.meta.to_dict(),
-            'domain': self.domain.to_dict(),
             'connectionProfile': self.connection_profile.to_dict(),
             'launch': {
                 'command': self.connection_profile.effective_command,
@@ -915,6 +928,10 @@ class PlanResult:
                 'transport': self.connection_profile.effective_transport,
             },
         }
+        if self.meta is not None:
+            payload['meta'] = self.meta.to_dict()
+        if self.domain is not None:
+            payload['domain'] = self.domain.to_dict()
         if self.key is not None:
             payload['key'] = self.key.to_dict()
         if self.capabilities is not None:

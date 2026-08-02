@@ -231,6 +231,30 @@ def test_apply_explicit_overrides_maps_transport_to_config() -> None:
     assert updated['connect']['domainSelector'] == 'new:demo-bridge'
 
 
+def test_bridge_parser_accepts_basic_flags() -> None:
+    parser = build_parser()
+    args = parser.parse_args([
+        'bridge',
+        '--domain', 'new:my-app',
+        '--local-port', '3000',
+        '--run',
+        '--name', 'my-bridge',
+    ])
+    assert args.command == 'bridge'
+    assert args.domain_selector == 'new:my-app'
+    assert args.local_port == 3000
+    assert args.run is True
+    assert args.name == 'my-bridge'
+
+
+def test_bridge_parser_does_not_require_token() -> None:
+    parser = build_parser()
+    args = parser.parse_args(['bridge', '--local-port', '3000'])
+    assert args.command == 'bridge'
+    assert args.token is None
+    assert args.local_port == 3000
+
+
 def test_oauth_login_parser_accepts_required_flags() -> None:
     parser = build_parser()
     args = parser.parse_args([

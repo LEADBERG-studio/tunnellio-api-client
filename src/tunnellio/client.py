@@ -311,6 +311,14 @@ class ApiClient:
     def get_launch_spec(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request_json(method='POST', path='/v1/launch-spec', payload=payload)
 
+    def get_public_tcp_bridge_launch(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request_json(
+            method='POST',
+            path='/v1/tcp-bridge/launch',
+            payload=payload,
+            include_auth=False,
+        )
+
     def exchange_oauth_token(self, *, token_url: str, form_payload: dict[str, Any]) -> dict[str, Any]:
         raw_payload = self._request_json(method='POST', url=token_url, form=form_payload, include_auth=False, expect_envelope=False)
         return self._unwrap_oauth_payload(raw_payload)

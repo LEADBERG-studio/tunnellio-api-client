@@ -113,18 +113,33 @@
 4. считать из ответа фактический домен / public URL / connection data;
 5. дальше использовать то же имя для `status --name` и `stop --name`.
 
-## TCP bridge: туннель без SSH-ключей
-TCP bridge — это альтернативный транспорт, который работает без reverse SSH и без SSH-ключей.
-Он удобен для сред, где исходящий SSH на 22/2222 закрыт или reverse SSH-сессия нестабильна.
+## TCP bridge: туннель без SSH-ключей и без API-токена
+TCP bridge — это самый простой способ поднять туннель. Команда `bridge` не требует ни SSH-ключа, ни API-токена.
 
-### Запуск с явным TCP bridge
+### Мгновенный туннель (без токена, без ключа)
 ```powershell
-.\tunnellio.exe --token YOUR_TOKEN connect --domain new:demo-app --local-port 3000 --transport tcp-bridge --run --watch --name demo-bridge
+.\tunnellio.exe bridge --local-port 3000 --run --name my-bridge
+```
+Клиент вызовет публичный `POST /v1/tcp-bridge/launch` без Bearer, получит `connectionProfile.tcpBridge` и запустит мост.
+
+### С заранее выбранным поддоменом
+```powershell
+.\tunnellio.exe bridge --domain new:my-app --local-port 3000 --run --name my-bridge
 ```
 
-### Запуск с auto-fallback (сначала SSH, потом TCP bridge)
+### Получить план без запуска (JSON)
 ```powershell
-.\tunnellio.exe --token YOUR_TOKEN connect --domain new:demo-app --local-port 3000 --transport auto --run --watch --name demo-auto
+.\tunnellio.exe bridge --local-port 3000 --output json
+```
+
+### TCP bridge через API-токен (с planning и capabilities)
+```powershell
+.\tunnellio.exe --token YOUR_TOKEN connect --domain new:my-app --local-port 3000 --transport tcp-bridge --run --watch --name my-bridge
+```
+
+### Auto-fallback (сначала SSH, потом TCP bridge)
+```powershell
+.\tunnellio.exe --token YOUR_TOKEN connect --domain new:my-app --local-port 3000 --transport auto --run --watch --name my-auto
 ```
 
 В логах видно фактический транспорт и публичный TCP port. В `status` и `show-config` транспорт тоже отражается.
