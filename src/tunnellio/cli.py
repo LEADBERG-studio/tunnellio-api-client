@@ -27,10 +27,17 @@ from .config import (
     resolve_state_dir,
     save_launch_config,
 )
-from .errors import ExitCode, TunnellioError, ValidationError
+from .errors import ExitCode, PlanRequiredError, TunnellioError, ValidationError
 from .models import Capabilities, DiscoveryMetadata, Meta, PlanResult, SessionSummary
 from .oauth import OAuthTokenRecord, build_token_storage_name, generate_pkce_pair, load_token_record, save_token_record
 from .output import OutputWriter
+from .modes import (
+    MODE_SSH_STABLE,
+    MODE_TCP_RANDOM,
+    MODE_TCP_STABLE,
+    describe_modes,
+    resolve_mode,
+)
 from .planner import PlanOptions, Planner, _split_selector
 
 COMMAND_TO_SECTION = {
@@ -806,8 +813,12 @@ def _resolve_oauth_endpoints(
     resolved_token_url = token_url
     resolved_introspect_url = introspect_url
     if use_discovery and (not resolved_authorize_url or not resolved_token_url or not resolved_introspect_url or not resolved_discovery_url):
-        meta = Meta.from_api(client.fetch_meta())
-        resolved_discovery_url = resolved_discovery_url or meta.oauth_authorization_server
+        try:
+            meta = Meta.from_api(client.fetch_meta())
+        except PlanRequiredError:
+            # Advisory endpoint. Explicit URLs (or none) are still workable.
+            meta = None
+        resolved_discovery_url = resolved_discovery_url or (meta.oauth_authorization_server if meta else None)
         if resolved_discovery_url:
             discovery = DiscoveryMetadata.from_api(client.fetch_oauth_authorization_server(discovery_url=resolved_discovery_url))
             resolved_authorize_url = resolved_authorize_url or discovery.authorization_endpoint
@@ -1457,13 +1468,25 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
     if verbose:
         os.environ['TUNNELLIO_VERBOSE'] = '1'
 
+    section_settings = dict(config_payload.get(section_key, {})) if section_key else {}
+    decision = resolve_mode(
+        command=command,
+        transport=section_settings.get('transport'),
+        connection_mode=section_settings.get('connectionMode'),
+        domain_selector=section_settings.get('domainSelector'),
+    )
+    local_only_commands = {'status', 'stop', 'show-config'}
+    needs_token = command not in local_only_commands and decision.requires_api_token
+
     runtime = load_runtime_config(
         token=global_config.get('token'),
         base_url=global_config.get('baseUrl'),
         state_dir=global_config.get('stateDir'),
         insecure_tls=global_config.get('insecureTls'),
-        require_token=command not in {'status', 'stop', 'show-config', 'bridge'},
+        require_token=needs_token,
     )
+    if not needs_token and command not in local_only_commands:
+        log_progress(verbose, f'Mode {decision.mode}: {decision.reason}')
 
     if command == 'status':
         settings = dict(config_payload.get('status', {}))
@@ -1520,7 +1543,16 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
 
     if command == 'meta':
         log_progress(verbose, 'Fetching API metadata')
-        writer.write_meta(Meta.from_api(client.fetch_meta()))
+        try:
+            writer.write_meta(Meta.from_api(client.fetch_meta()))
+        except PlanRequiredError as exc:
+            # Say plainly that the token is fine and the plan is the limit.
+            raise PlanRequiredError(
+                f'{exc} Your API token is valid; this endpoint is not part of the plan. '
+                'Tunnels do not require it.',
+                exc.details,
+                code=exc.code,
+            ) from exc
         return int(ExitCode.SUCCESS)
 
     if command == 'capabilities':
@@ -1577,8 +1609,13 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
         tcp_bridge_password=settings.get('tcpBridgePassword'),
     )
     log_progress(verbose, f'Building {command} plan')
-    if is_bridge_command:
+    # With an API token the full flow covers every mode. Without one, the
+    # tokenless modes still work and must not be blocked.
+    tokenless = not runtime.token and not decision.requires_api_token
+    if is_bridge_command or (tokenless and decision.mode in {MODE_TCP_STABLE, MODE_TCP_RANDOM}):
         result = planner.build_keyless_bridge_plan(options)
+    elif tokenless and decision.mode == MODE_SSH_STABLE:
+        result = planner.build_offline_ssh_plan(options)
     else:
         result = planner.build_plan(options)
 

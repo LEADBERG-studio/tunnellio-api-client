@@ -8,8 +8,14 @@ from typing import Any
 from .client import ApiClient
 from .config import RuntimeConfig
 from .discovery import build_discovery_url, build_protected_resource_metadata_url
-from .errors import ApiError, InteractiveInputRequiredError, RequestedAuthModeMismatchError, ValidationError
-from .models import (
+from .errors import (
+    ApiError,
+    InteractiveInputRequiredError,
+    PlanRequiredError,
+    RequestedAuthModeMismatchError,
+    ValidationError,
+)
+from .models import (  # noqa: F401 - ConnectionProfile is built locally too
     Capabilities,
     ConnectionProfile,
     DiscoveryMetadata,
@@ -21,6 +27,14 @@ from .models import (
     SavedProfile,
     SessionSummary,
 )
+
+
+# Tunnellio SSH edge defaults, used only by the tokenless offline SSH mode.
+# With an API token the server supplies these values instead.
+DEFAULT_SSH_HOST = 'tunnellio.site'
+DEFAULT_SSH_PORT = 2222
+DEFAULT_SSH_USER = 'tunnel'
+DEFAULT_TUNNEL_DOMAIN = 'tunnellio.site'
 
 
 @dataclass(slots=True)
@@ -50,9 +64,33 @@ class Planner:
         self._client = client
         self._config = config
 
+    def fetch_meta_or_degrade(self) -> tuple[Meta | None, str | None]:
+        """``/v1/meta`` is advisory. A plan refusal must not abort the launch.
+
+        Free accounts answer ``403 plan_required`` here. Until 0.6.0 that took
+        down every ``connect``, even for transports that never needed the
+        metadata in the first place.
+        """
+        try:
+            return Meta.from_api(self._client.fetch_meta()), None
+        except PlanRequiredError as exc:
+            return None, f'meta unavailable on this plan: {exc}'
+
+    def fetch_capabilities_or_degrade(self) -> tuple[Capabilities, str | None]:
+        """``/v1/capabilities`` is advisory too; fall back to placeholders."""
+        try:
+            return Capabilities.from_api(self._client.fetch_capabilities()), None
+        except PlanRequiredError as exc:
+            return Capabilities.unknown(), f'capabilities unavailable on this plan: {exc}'
+
     def build_plan(self, options: PlanOptions) -> PlanResult:
-        meta = Meta.from_api(self._client.fetch_meta())
-        capabilities = Capabilities.from_api(self._client.fetch_capabilities())
+        degraded: list[str] = []
+        meta, meta_note = self.fetch_meta_or_degrade()
+        if meta_note:
+            degraded.append(meta_note)
+        capabilities, caps_note = self.fetch_capabilities_or_degrade()
+        if caps_note:
+            degraded.append(caps_note)
         payload = self.build_launch_payload(options, capabilities)
         data = self._client.get_launch_spec(payload)
 
@@ -85,6 +123,7 @@ class Planner:
             session_open_payload=session_open_payload,
             auth=auth_contract,
             runtime=runtime_contract,
+            degraded=degraded,
         )
 
     def build_keyless_bridge_plan(self, options: PlanOptions) -> PlanResult:
@@ -133,6 +172,74 @@ class Planner:
             runtime=runtime_contract,
         )
 
+    def build_offline_ssh_plan(
+        self,
+        options: PlanOptions,
+        *,
+        ssh_host: str = DEFAULT_SSH_HOST,
+        ssh_port: int = DEFAULT_SSH_PORT,
+        ssh_user: str = DEFAULT_SSH_USER,
+        tunnel_domain: str = DEFAULT_TUNNEL_DOMAIN,
+    ) -> PlanResult:
+        """Plan a direct SSH reverse forward without touching the API.
+
+        A reserved domain with its SSH key bound to it already contains
+        everything needed to connect: the edge speaks the sish protocol, so the
+        client can build the command locally. Requiring an API token here was
+        an artificial restriction.
+        """
+        if not options.domain_selector:
+            raise ValidationError(
+                'A reserved domain is required for the tokenless SSH mode.',
+                details={'hint': 'Use --domain existing:<hostname>.'},
+            )
+        _mode, hostname = _split_selector(options.domain_selector, label='domain')
+        if not hostname:
+            raise ValidationError('A reserved domain hostname is required.')
+
+        remote = f'{hostname}:80:{options.local_host}:{options.local_port}'
+        ssh_args = [
+            '-N',
+            '-T',
+            '-o', 'StrictHostKeyChecking=accept-new',
+            '-o', 'ServerAliveInterval=30',
+            '-o', 'ServerAliveCountMax=3',
+            '-o', 'ExitOnForwardFailure=yes',
+            '-p', str(ssh_port),
+            '-R', remote,
+            f'{ssh_user}@{ssh_host}',
+        ]
+        connection_profile = ConnectionProfile(
+            ssh_host=ssh_host,
+            ssh_port=ssh_port,
+            ssh_user=ssh_user,
+            remote_hostname=hostname,
+            local_host=options.local_host,
+            local_port=options.local_port,
+            public_url=f'https://{hostname}.{tunnel_domain}',
+            ssh_command='ssh',
+            ssh_args=ssh_args,
+            connection_mode='ssh',
+            requires_ssh_key=True,
+            requires_api_token=False,
+        )
+        return PlanResult(
+            mode=options.mode,
+            meta=None,
+            key=None,
+            domain=None,
+            connection_profile=connection_profile,
+            session=None,
+            saved_profile=None,
+            capabilities=None,
+            discovery=None,
+            protected_resource=None,
+            session_open_payload=None,
+            auth=None,
+            runtime=self.build_runtime_contract(options, connection_profile, None),
+            degraded=['offline ssh mode: the Integration API was not used'],
+        )
+
     def build_launch_payload(self, options: PlanOptions, capabilities: Capabilities | None = None) -> dict[str, Any]:
         capabilities = capabilities or Capabilities.from_api(self._client.fetch_capabilities())
         if not options.domain_selector:
@@ -169,7 +276,9 @@ class Planner:
         is_tcp_bridge = options.connection_mode == 'tcp_bridge'
 
         if domain_mode in {'random', 'ephemeral', 'ephemeral_random'}:
-            if not capabilities.ephemeral.enabled or not capabilities.domains.supports_random_ephemeral:
+            if capabilities.known and (
+                not capabilities.ephemeral.enabled or not capabilities.domains.supports_random_ephemeral
+            ):
                 raise ValidationError('Random ephemeral domains are not available for this token.')
             key_required = not is_tcp_bridge
             key_payload = self._build_key_payload(options, capabilities, required=key_required)
@@ -183,7 +292,7 @@ class Planner:
             return root_payload
 
         if domain_mode == 'new':
-            if not capabilities.domains.can_create:
+            if capabilities.known and not capabilities.domains.can_create:
                 raise ValidationError('Creating persistent domains is not allowed for this token.')
             self._validate_domain_lifetime(options.domain_lifetime_days, capabilities)
             key_required = not is_tcp_bridge
@@ -261,19 +370,24 @@ class Planner:
 
     def build_auth_contract(
         self,
-        meta: Meta,
+        meta: Meta | None,
         connection_profile: ConnectionProfile,
         session: SessionSummary | None,
         discovery: DiscoveryMetadata | None,
         protected_resource: ProtectedResourceMetadata | None,
     ) -> dict[str, Any]:
-        discovery_url = connection_profile.discovery_url or meta.oauth_authorization_server or build_discovery_url(auth_domain=meta.auth_domain)
+        auth_domain = meta.auth_domain if meta else None
+        discovery_url = (
+            connection_profile.discovery_url
+            or (meta.oauth_authorization_server if meta else None)
+            or build_discovery_url(auth_domain=auth_domain)
+        )
         resource_url = protected_resource.resource if protected_resource and protected_resource.resource else connection_profile.public_url
         protected_resource_metadata_url = build_protected_resource_metadata_url(resource_url=resource_url)
         return {
             'authMode': connection_profile.auth_mode or (session.auth_mode if session else None),
             'connectionMode': connection_profile.connection_mode or (session.connection_mode if session else None),
-            'authDomain': meta.auth_domain,
+            'authDomain': auth_domain,
             'discoveryUrl': discovery_url,
             'protectedResourceMetadataUrl': protected_resource_metadata_url,
             'resource': (protected_resource.resource if protected_resource and protected_resource.resource else connection_profile.public_url),
@@ -281,7 +395,7 @@ class Planner:
             'authorizeUrl': connection_profile.authorize_url or (discovery.authorization_endpoint if discovery else None),
             'tokenUrl': connection_profile.token_url or (discovery.token_endpoint if discovery else None),
             'introspectUrl': connection_profile.introspect_url or (discovery.introspection_endpoint if discovery else None),
-            'tokenVerification': connection_profile.token_verification or meta.oauth_token_verification,
+            'tokenVerification': connection_profile.token_verification or (meta.oauth_token_verification if meta else None),
             'oauthClientPolicy': connection_profile.oauth_client_policy,
             'scopesSupported': (protected_resource.scopes_supported if protected_resource and protected_resource.scopes_supported else (discovery.scopes_supported if discovery else [])),
             'codeChallengeMethodsSupported': discovery.code_challenge_methods_supported if discovery else [],
@@ -332,7 +446,7 @@ class Planner:
 
     def _load_discovery(
         self,
-        meta: Meta,
+        meta: Meta | None,
         connection_profile: ConnectionProfile,
         options: PlanOptions,
     ) -> DiscoveryMetadata | None:
@@ -340,8 +454,8 @@ class Planner:
             return None
         discovery_url = (
             connection_profile.discovery_url
-            or meta.oauth_authorization_server
-            or build_discovery_url(auth_domain=meta.auth_domain)
+            or (meta.oauth_authorization_server if meta else None)
+            or build_discovery_url(auth_domain=meta.auth_domain if meta else None)
         )
         if not discovery_url:
             return None
@@ -351,8 +465,16 @@ class Planner:
             return None
         return DiscoveryMetadata.from_api(payload)
 
-    def _load_protected_resource(self, meta: Meta, connection_profile: ConnectionProfile) -> ProtectedResourceMetadata | None:
-        candidates = [connection_profile.public_url, meta.auth_base_url, meta.api_base_url]
+    def _load_protected_resource(
+        self,
+        meta: Meta | None,
+        connection_profile: ConnectionProfile,
+    ) -> ProtectedResourceMetadata | None:
+        candidates = [
+            connection_profile.public_url,
+            meta.auth_base_url if meta else None,
+            meta.api_base_url if meta else None,
+        ]
         for candidate in candidates:
             resource_metadata_url = build_protected_resource_metadata_url(resource_url=candidate)
             if not resource_metadata_url:
@@ -390,7 +512,7 @@ class Planner:
             }
 
         if key_mode == 'new':
-            if not capabilities.keys.can_create:
+            if capabilities.known and not capabilities.keys.can_create:
                 raise ValidationError('Creating keys is not allowed for this token.')
             self._validate_key_lifetime(options.key_lifetime_days, capabilities)
             if not options.public_key_path:
@@ -444,7 +566,7 @@ class Planner:
         raise ValidationError(f"Domain '{value}' was not found.")
 
     def _validate_key_lifetime(self, lifetime_days: int | None, capabilities: Capabilities) -> None:
-        if lifetime_days is None:
+        if lifetime_days is None or not capabilities.known:
             return
         if lifetime_days < capabilities.keys.min_lifetime_days or lifetime_days > capabilities.keys.max_lifetime_days:
             raise ValidationError(
@@ -457,7 +579,7 @@ class Planner:
             )
 
     def _validate_domain_lifetime(self, lifetime_days: int | None, capabilities: Capabilities) -> None:
-        if lifetime_days is None:
+        if lifetime_days is None or not capabilities.known:
             return
         if lifetime_days < capabilities.domains.min_lifetime_days or lifetime_days > capabilities.domains.max_lifetime_days:
             raise ValidationError(
@@ -471,18 +593,21 @@ class Planner:
 
     def _save_profile(
         self,
-        meta: Meta,
+        meta: Meta | None,
         key: KeySummary | None,
         domain: DomainSummary,
         connection_profile: ConnectionProfile,
         session: SessionSummary | None,
     ) -> SavedProfile:
+        # meta is legitimately absent for keyless bridge flows and for plans
+        # that do not expose /v1/meta, so the profile must save without it.
         target_path = self._config.profiles_dir / f'{domain.hostname}.json'
         payload: dict[str, Any] = {
-            'meta': meta.to_dict(),
             'domain': domain.to_dict(),
             'connectionProfile': connection_profile.to_dict(),
         }
+        if meta is not None:
+            payload['meta'] = meta.to_dict()
         if key is not None:
             payload['key'] = key.to_dict()
         if session is not None:

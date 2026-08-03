@@ -43,6 +43,8 @@ import tests.test_planner as planner_tests
 import tests.test_client as client_tests
 import tests.test_oauth as oauth_tests
 import tests.test_bridge as bridge_tests
+import tests.test_errors as errors_tests
+import tests.test_modes as modes_tests
 
 cli_tests.test_parser_allows_empty_argv()
 cli_tests.test_connect_flags_are_optional_until_explicitly_set()
@@ -100,6 +102,38 @@ oauth_tests.test_build_authorize_url()
 oauth_tests.test_token_record_from_response_and_roundtrip(Path('test-artifacts/build-script-oauth-record'))
 oauth_tests.test_token_record_requires_access_token()
 oauth_tests.test_build_token_storage_name()
+errors_tests.test_plan_required_code_is_not_an_auth_failure()
+errors_tests.test_plan_wording_on_403_is_detected_without_a_dedicated_code()
+errors_tests.test_unauthorized_is_still_an_auth_error()
+errors_tests.test_plain_forbidden_is_still_an_auth_error()
+errors_tests.test_is_plan_limit_matrix()
+errors_tests.test_plan_required_payload_keeps_the_server_code()
+errors_tests.test_other_errors_are_unchanged()
+modes_tests.test_api_token_unlocks_every_mode()
+modes_tests.test_api_token_alone_still_unlocks_every_mode()
+modes_tests.test_ssh_key_only_leaves_three_modes()
+modes_tests.test_no_credentials_leaves_the_two_keyless_modes()
+modes_tests.test_the_three_fallback_modes_never_need_an_api_token()
+modes_tests.test_only_ssh_stable_needs_an_ssh_key()
+modes_tests.test_resolve_ssh_stable()
+modes_tests.test_resolve_tcp_stable()
+modes_tests.test_resolve_tcp_random()
+modes_tests.test_connection_mode_is_honoured_when_transport_is_absent()
+modes_tests.test_bridge_command_is_always_tokenless()
+modes_tests.test_api_flows_still_require_a_token()
+modes_tests.test_auto_transport_is_treated_as_api_until_it_resolves()
+modes_tests.test_is_random_domain()
+modes_tests.test_describe_modes_is_human_readable()
+modes_tests.test_offline_ssh_plan_needs_no_api_client()
+modes_tests.test_offline_ssh_plan_rejects_a_missing_domain()
+planner_tests.test_plan_required_meta_does_not_abort_the_plan()
+planner_tests.test_plan_required_capabilities_fall_back_to_placeholders()
+planner_tests.test_plan_limits_do_not_block_a_full_connect()
+planner_tests.test_unknown_capabilities_allow_random_ephemeral()
+planner_tests.test_known_capabilities_still_gate_random_ephemeral()
+planner_tests.test_unknown_capabilities_skip_lifetime_validation()
+planner_tests.test_rejected_token_still_fails()
+planner_tests.test_keyless_bridge_profile_saves_without_meta()
 print('manual tests passed')
 "@
     Set-Content -Path $TestScript -Value $TestCode -Encoding UTF8

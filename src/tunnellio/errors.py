@@ -57,6 +57,30 @@ class AuthError(TunnellioError):
         )
 
 
+class PlanRequiredError(TunnellioError):
+    """The credential is valid, but the account plan does not cover this endpoint.
+
+    This is deliberately NOT an ``AuthError``. The token authenticated
+    successfully; the server simply declined to serve one advisory endpoint.
+    Callers that only need discovery data can degrade gracefully instead of
+    aborting the whole launch, and integrators can tell a real credential
+    failure apart from a plan limit.
+    """
+
+    def __init__(
+        self,
+        message: str = 'This endpoint is not included in the current plan.',
+        details: dict[str, Any] | None = None,
+        code: str = 'plan_required',
+    ):
+        super().__init__(
+            code=code,
+            message=message,
+            details=details,
+            exit_code=ExitCode.API,
+        )
+
+
 class ApiError(TunnellioError):
     def __init__(self, message: str = 'API request failed.', details: dict[str, Any] | None = None):
         super().__init__(
@@ -143,6 +167,27 @@ class InteractiveInputRequiredError(TunnellioError):
         )
 
 
+PLAN_REQUIRED_CODES = frozenset(
+    {
+        'plan_required',
+        'plan_upgrade_required',
+        'feature_not_in_plan',
+        'subscription_required',
+    }
+)
+
+
+def is_plan_limit(*, code: str, message: str, status: int | None) -> bool:
+    """Tell a plan/tier refusal apart from a rejected credential.
+
+    Both arrive as HTTP 403, but they mean opposite things: one says the token
+    is wrong, the other says the token is fine and the feature is not included.
+    """
+    if code in PLAN_REQUIRED_CODES:
+        return True
+    return status == 403 and 'plan' in message.lower()
+
+
 def error_from_api(
     *,
     code: str,
@@ -150,6 +195,8 @@ def error_from_api(
     details: dict[str, Any] | None = None,
     status: int | None = None,
 ) -> TunnellioError:
+    if is_plan_limit(code=code, message=message, status=status):
+        return PlanRequiredError(message, details, code=code or 'plan_required')
     if code in {'unauthorized', 'forbidden'} or status in {401, 403}:
         return AuthError(message, details)
     if code in {

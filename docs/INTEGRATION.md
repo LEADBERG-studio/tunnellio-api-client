@@ -16,6 +16,67 @@ It must be able to:
 3. read back the resolved server-side connection data
 4. continue managing the same tunnel by that name
 
+## Credentials and available modes (0.6.0)
+
+The API token is the most capable credential, not a prerequisite. A calling
+application can pick a mode based on what the operator actually has.
+
+| Credentials | Available modes |
+| --- | --- |
+| API token | everything: full API flow, `ssh_stable`, `tcp_stable`, `tcp_random` |
+| SSH key only | `ssh_stable`, `tcp_stable`, `tcp_random` |
+| nothing | `tcp_stable`, `tcp_random` |
+
+- `ssh_stable` — direct SSH reverse forward to a domain you already reserved,
+  with the key you bound to it. Built locally, no API call.
+- `tcp_stable` — keyless TCP bridge pinned to a reserved domain.
+- `tcp_random` — keyless TCP bridge on a server-issued domain.
+
+In those three modes the API token is never read and never validated, even if
+one is configured. Operations that genuinely use the Integration API (creating a
+domain or key, cloud proxy, OAuth, `--transport auto`) still require a token.
+
+```powershell
+# No credentials at all
+.\tunnellio.exe connect --transport tcp-bridge --domain random --local-port 3000 --run
+
+# Reserved domain, still no API token
+.\tunnellio.exe connect --transport tcp-bridge --domain existing:mcp --local-port 3000 --run
+
+# Reserved domain plus your own SSH key, still no API token
+.\tunnellio.exe connect --transport ssh --domain existing:mcp --local-port 3000 --run
+```
+
+Programmatic check:
+
+```python
+from tunnellio.modes import available_modes, resolve_mode
+
+available_modes(has_api_token=False, has_ssh_key=True)
+# ('ssh_stable', 'tcp_stable', 'tcp_random')
+
+resolve_mode(command='connect', transport='ssh', domain_selector='existing:mcp')
+# ModeDecision(mode='ssh_stable', requires_api_token=False, ...)
+```
+
+## Plan limits are not auth failures
+
+`POST /v1/meta` and `POST /v1/capabilities` are advisory. Some plans refuse them
+with `403 plan_required`. Since 0.6.0 that raises `PlanRequiredError`, never
+`AuthError`, and the launch continues. Whatever was unavailable is listed in the
+`degraded` array of the JSON result:
+
+```json
+{
+  "ok": true,
+  "degraded": ["meta unavailable on this plan: ..."]
+}
+```
+
+When capabilities are unknown, the client stops enforcing local guesses about
+what the account may do. The server remains the source of truth and rejects
+anything it does not allow.
+
 ## Core guarantees
 For every managed tunnel, the client guarantees:
 - a runtime name always exists

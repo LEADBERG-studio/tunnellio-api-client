@@ -1,8 +1,15 @@
+import json
 from pathlib import Path
 
 from tunnellio.models import Capabilities
 from tunnellio.planner import PlanOptions, Planner, _split_selector
-from tunnellio.errors import InteractiveInputRequiredError, RequestedAuthModeMismatchError, ValidationError
+from tunnellio.errors import (
+    AuthError,
+    InteractiveInputRequiredError,
+    PlanRequiredError,
+    RequestedAuthModeMismatchError,
+    ValidationError,
+)
 
 
 class DummyClient:
@@ -502,3 +509,136 @@ def test_password_required_profile_parses() -> None:
     assert tb.password_required is True
     assert tb.client_protocol is not None
     assert tb.client_protocol.hello == {'type': 'hello', 'hostname': 'demo-app'}
+
+
+class PlanLimitedClient(DummyClient):
+    """A free-plan account: advisory endpoints are refused, tunnels still work."""
+
+    def __init__(self, refuse_meta: bool = True, refuse_capabilities: bool = True):
+        self.refuse_meta = refuse_meta
+        self.refuse_capabilities = refuse_capabilities
+
+    def fetch_meta(self):
+        if self.refuse_meta:
+            raise PlanRequiredError('Your plan does not include this endpoint.')
+        return super().fetch_meta()
+
+    def fetch_capabilities(self):
+        if self.refuse_capabilities:
+            raise PlanRequiredError('Your plan does not include this endpoint.')
+        return super().fetch_capabilities()
+
+
+class RejectedTokenClient(DummyClient):
+    """A genuinely bad credential must still fail loudly."""
+
+    def fetch_meta(self):
+        raise AuthError('Invalid token.')
+
+
+def test_plan_required_meta_does_not_abort_the_plan() -> None:
+    planner = Planner(PlanLimitedClient(refuse_capabilities=False), DummyConfig())
+    result = planner.build_plan(
+        PlanOptions(
+            key_selector='existing:work',
+            domain_selector='existing:demo',
+            local_port=4040,
+            requested_auth_mode='oauth',
+        )
+    )
+    assert result.meta is None
+    assert result.connection_profile is not None
+    payload = result.to_dict()
+    assert 'meta' not in payload
+    assert any('meta unavailable' in note for note in payload['degraded'])
+
+
+def test_plan_required_capabilities_fall_back_to_placeholders() -> None:
+    planner = Planner(PlanLimitedClient(refuse_meta=False), DummyConfig())
+    result = planner.build_plan(
+        PlanOptions(
+            key_selector='existing:work',
+            domain_selector='existing:demo',
+            local_port=4040,
+            requested_auth_mode='oauth',
+        )
+    )
+    assert result.capabilities is not None
+    assert result.capabilities.known is False
+    assert result.to_dict()['capabilities']['known'] is False
+
+
+def test_plan_limits_do_not_block_a_full_connect() -> None:
+    planner = Planner(PlanLimitedClient(), DummyConfig())
+    result = planner.build_plan(
+        PlanOptions(
+            key_selector='existing:work',
+            domain_selector='existing:demo',
+            local_port=4040,
+            requested_auth_mode='oauth',
+        )
+    )
+    assert result.meta is None
+    assert result.capabilities.known is False
+    assert len(result.degraded) == 2
+
+
+def test_unknown_capabilities_allow_random_ephemeral() -> None:
+    planner = Planner(PlanLimitedClient(), DummyConfig())
+    payload = planner.build_launch_payload(
+        PlanOptions(domain_selector='random', local_port=3000, connection_mode='tcp_bridge'),
+        Capabilities.unknown(),
+    )
+    assert payload['domainMode'] == 'ephemeral_random'
+
+
+def test_known_capabilities_still_gate_random_ephemeral() -> None:
+    raw = DummyClient().fetch_capabilities()
+    raw['ephemeral']['enabled'] = False
+    capabilities = Capabilities.from_api(raw)
+    planner = Planner(DummyClient(), DummyConfig())
+    try:
+        planner.build_launch_payload(
+            PlanOptions(domain_selector='random', local_port=3000, connection_mode='tcp_bridge'),
+            capabilities,
+        )
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError('ValidationError was not raised')
+
+
+def test_unknown_capabilities_skip_lifetime_validation() -> None:
+    planner = Planner(PlanLimitedClient(), DummyConfig())
+    planner._validate_domain_lifetime(99999, Capabilities.unknown())
+    planner._validate_key_lifetime(99999, Capabilities.unknown())
+
+
+def test_rejected_token_still_fails() -> None:
+    planner = Planner(RejectedTokenClient(), DummyConfig())
+    try:
+        planner.build_plan(PlanOptions(key_selector='existing:work', domain_selector='existing:demo'))
+    except AuthError:
+        pass
+    else:
+        raise AssertionError('AuthError was not raised')
+
+
+def test_keyless_bridge_profile_saves_without_meta(tmp_path=Path('test-artifacts/plan-required-save')) -> None:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+
+    class SavingConfig:
+        profiles_dir = tmp_path
+
+    planner = Planner(KeylessBridgeDummyClient(), SavingConfig())
+    result = planner.build_keyless_bridge_plan(
+        PlanOptions(domain_selector='random', local_port=3000, save_profile=True)
+    )
+    if result.saved_profile is None:
+        # This dummy returns no domain block, so there is nothing to name the
+        # profile after. The point of the test is that the keyless path no
+        # longer crashes when meta is absent.
+        return
+    saved = json.loads(Path(result.saved_profile.path).read_text(encoding='utf-8'))
+    assert 'meta' not in saved
+    assert 'connectionProfile' in saved

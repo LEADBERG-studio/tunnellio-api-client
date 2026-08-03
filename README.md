@@ -18,6 +18,45 @@
 
 **TCP bridge не требует внешних бинарей.** Мост реализован внутри клиента на чистом Python.
 
+## Учётные данные и доступные режимы (0.6.0)
+
+API-ключ покрывает все сценарии, но он больше не является обязательным. Если его
+нет или он неверен, остаётся много возможностей.
+
+| Что есть у клиента | Доступные режимы |
+| --- | --- |
+| API-ключ | всё: полный API-поток, `ssh_stable`, `tcp_stable`, `tcp_random` |
+| только SSH-ключ | `ssh_stable`, `tcp_stable`, `tcp_random` |
+| ничего | `tcp_stable`, `tcp_random` |
+
+- `ssh_stable` — прямой SSH reverse forward на зарезервированный домен вашим
+  ключом. Команда собирается локально, обращений к API нет.
+- `tcp_stable` — keyless TCP-мост на зарезервированный домен.
+- `tcp_random` — keyless TCP-мост на домен, который выдаёт сервер.
+
+В этих трёх режимах **API-ключ вообще не проверяется**, даже если он настроен.
+Токен по-прежнему нужен там, где реально работает Integration API: создание
+домена или ключа, cloud proxy, OAuth, `--transport auto`.
+
+```powershell
+# Без единого ключа
+.\tunnellio.exe connect --transport tcp-bridge --domain random --local-port 3000 --run
+
+# Свой домен, по-прежнему без API-ключа
+.\tunnellio.exe connect --transport tcp-bridge --domain existing:mcp --local-port 3000 --run
+
+# Свой домен и свой SSH-ключ, по-прежнему без API-ключа
+.\tunnellio.exe connect --transport ssh --domain existing:mcp --local-port 3000 --run
+```
+
+## Ограничения тарифа больше не выглядят как ошибка авторизации
+
+`POST /v1/meta` и `POST /v1/capabilities` носят справочный характер. На части
+тарифов сервер отвечает `403 plan_required`. Раньше это превращалось в ошибку
+авторизации и валило весь `connect`, хотя ключ был полностью рабочим. Теперь это
+отдельная ошибка `PlanRequiredError`, запуск продолжается, а список
+недоступного возвращается в поле `degraded`.
+
 ## Что реализовано
 - Bearer auth для POST-only API
 - discovery через `POST /v1/meta`

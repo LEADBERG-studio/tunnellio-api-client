@@ -1,5 +1,70 @@
 # Changelog
 
+## 0.6.0
+
+### Credential-aware connection modes
+
+The API token is now the most capable credential, not a hard prerequisite. What
+works with what:
+
+| Credentials | Available modes |
+| --- | --- |
+| API token | everything: full API flow, SSH stable, TCP stable, TCP random |
+| SSH key only | `ssh_stable`, `tcp_stable`, `tcp_random` |
+| nothing | `tcp_stable`, `tcp_random` |
+
+In those last three modes the API token is never read and never validated, even
+if one happens to be configured.
+
+- Added `tunnellio/modes.py`: the credential matrix, `resolve_mode()`,
+  `available_modes()`, `requires_api_token()`, `requires_ssh_key()`.
+- `connect` no longer demands a token up front. The requirement is derived from
+  the mode the launch actually resolves to.
+- Added `Planner.build_offline_ssh_plan()`: a direct SSH reverse forward to a
+  reserved domain, built locally with no API call at all. A reserved domain plus
+  its bound key already contains everything needed to connect.
+- `connect` routes to the keyless bridge endpoint automatically for
+  `tcp_stable` / `tcp_random` when no token is configured.
+- Operations that genuinely use the API (creating a domain or key, cloud proxy,
+  OAuth, `auto` transport) still require a token, unchanged.
+
+### Plan limits are no longer reported as auth failures
+
+- Added `PlanRequiredError`. Previously any HTTP 403 became `AuthError`, so a
+  free account hitting `403 plan_required` on `POST /v1/meta` looked like a bad
+  credential and aborted the whole `connect`. This is the bug that forced
+  integrators to bypass the CLI entirely.
+- Added `PLAN_REQUIRED_CODES` and `is_plan_limit()`. A plain `forbidden` with no
+  plan wording is still an `AuthError`.
+- `POST /v1/meta` and `POST /v1/capabilities` are now advisory. A plan refusal
+  degrades gracefully instead of aborting.
+- Added `Capabilities.known` and `Capabilities.unknown()`. When the server does
+  not describe its capabilities, the client stops second-guessing it: the server
+  remains the source of truth and rejects anything it does not allow.
+- Capability gates (random ephemeral, domain/key creation, lifetime ranges) are
+  skipped when capabilities are unknown, and still enforced when they are known.
+- Added `PlanResult.degraded`, surfaced as `degraded` in JSON output, so callers
+  can see exactly which advisory data was unavailable.
+- The `meta` command now states plainly that the token is valid and the plan is
+  the limit.
+
+### Fixes
+
+- `bridge --save-profile` always crashed: `_save_profile()` called
+  `meta.to_dict()`, but the keyless bridge path passes `meta=None` by design.
+  Meta is now written only when present.
+- `meta` is optional throughout the planner: `_load_discovery`,
+  `_load_protected_resource`, `build_auth_contract` and `_save_profile`.
+
+### Tests
+
+- New `tests/test_errors.py`: plan-limit versus auth-failure matrix.
+- New `tests/test_modes.py`: the credential matrix, mode resolution and the
+  offline SSH plan.
+- New plan-limit cases in `tests/test_planner.py`.
+- 91 tests pass across errors, modes, planner, cli, client, bridge, config and
+  oauth.
+
 ## 0.5.0
 - Added TCP bridge password support (`tcpBridgePassword`, `passwordRequired`, `clientProtocol`)
 - Added `--tcp-bridge-password` CLI flag for `plan`, `connect`, and `bridge` commands

@@ -489,6 +489,7 @@ class Capabilities:
     domains: DomainCapabilities
     ephemeral: EphemeralCapabilities
     oauth_proxy: OAuthProxyCapabilities = field(default_factory=OAuthProxyCapabilities)
+    known: bool = True
 
     @classmethod
     def from_api(cls, payload: dict[str, Any]) -> 'Capabilities':
@@ -499,6 +500,41 @@ class Capabilities:
             oauth_proxy=OAuthProxyCapabilities.from_api(payload.get('oauthProxy')),
         )
 
+    @classmethod
+    def unknown(cls) -> 'Capabilities':
+        """Placeholder used when the server declines to describe capabilities.
+
+        Some plans do not expose ``/v1/capabilities``. Refusing to launch in
+        that case would be wrong: the server is the source of truth and will
+        reject anything it does not allow. So the client stops second-guessing
+        and lets the request through, with ``known`` marking the values as
+        placeholders rather than facts.
+        """
+        return cls(
+            keys=KeyCapabilities(
+                max_count=0,
+                can_create=True,
+                can_delete=True,
+                min_lifetime_days=0,
+                max_lifetime_days=36500,
+                default_lifetime_days=None,
+            ),
+            domains=DomainCapabilities(
+                can_create=True,
+                can_delete=True,
+                supports_random_ephemeral=True,
+                min_lifetime_days=0,
+                max_lifetime_days=36500,
+                default_lifetime_days=None,
+            ),
+            ephemeral=EphemeralCapabilities(
+                enabled=True,
+                delete_on_disconnect=True,
+                fallback_lifetime_hours=24,
+            ),
+            known=False,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         payload = {
             'keys': self.keys.to_dict(),
@@ -507,6 +543,8 @@ class Capabilities:
         }
         if self.oauth_proxy:
             payload['oauthProxy'] = self.oauth_proxy.to_dict()
+        if not self.known:
+            payload['known'] = False
         return payload
 
 
@@ -945,6 +983,7 @@ class PlanResult:
     session_open_payload: dict[str, Any] | None = None
     auth: dict[str, Any] | None = None
     runtime: dict[str, Any] | None = None
+    degraded: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -979,4 +1018,6 @@ class PlanResult:
             payload['session'] = self.session.to_dict()
         if self.saved_profile is not None:
             payload['savedProfile'] = self.saved_profile.to_dict()
+        if self.degraded:
+            payload['degraded'] = list(self.degraded)
         return payload
