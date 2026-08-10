@@ -1,5 +1,8 @@
 # Documentation index
 
+> Русская версия этого раздела: [`docs/ru/`](ru/README.md). Английские файлы
+> остаются каноническими; при расхождении правым считается английский текст.
+
 ## Build and packaging
 - `BUILD_WINDOWS.md` — how to build `tunnellio.exe` from source
 - `RELEASES.md` — how to stage and zip a downloadable release bundle

@@ -1,5 +1,7 @@
 # Tunnellio CLI
 
+Документация: [`docs/ru/`](docs/ru/README.md) на русском, [`docs/`](docs/README.md) на английском.
+
 Полностью самодостаточный клиент для Tunnellio Integration API. TCP bridge реализован нативно на Python — без внешних бинарей.
 
 ## Формат поставки
