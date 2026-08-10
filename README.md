@@ -1,3 +1,5 @@
+<img width="1500" height="552" alt="Tunnellio CLI" src="https://github.com/user-attachments/assets/ec853730-999a-40e7-9f05-3614348c9e46" />
+
 # Tunnellio CLI
 
 Документация: [`docs/ru/`](docs/ru/README.md) на русском, [`docs/`](docs/README.md) на английском.
