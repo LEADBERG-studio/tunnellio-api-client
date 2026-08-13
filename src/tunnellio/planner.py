@@ -57,6 +57,7 @@ class PlanOptions:
     session_strategy: str | None = None
     enable_pkce: bool = False
     tcp_bridge_password: str | None = None
+    bridge_key: str | None = None
 
 
 class Planner:
@@ -145,6 +146,12 @@ class Planner:
             payload['note'] = options.note
         if options.tcp_bridge_password:
             payload['tcpBridgePassword'] = options.tcp_bridge_password
+        # Ключ адреса. Он доказывает право на уже заведённый поддомен, и без
+        # него сервер выдаёт только временное имя: своё имя в запросе без ключа
+        # отбивается как account_required. Владелец берёт ключ в консоли рядом с
+        # самой командой запуска.
+        if options.bridge_key:
+            payload['bridgeKey'] = options.bridge_key
 
         data = self._client.get_public_tcp_bridge_launch(payload)
         connection_profile = ConnectionProfile.from_api(data.get('connectionProfile', data))

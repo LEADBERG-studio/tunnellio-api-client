@@ -89,6 +89,7 @@ SECTION_FIELD_MAPS: dict[str, dict[str, str]] = {
         'enable_pkce': 'enablePkce',
         'transport': 'transport',
         'tcp_bridge_password': 'tcpBridgePassword',
+        'bridge_key': 'bridgeKey',
     },
     'connect': {
         'output': 'output',
@@ -110,6 +111,7 @@ SECTION_FIELD_MAPS: dict[str, dict[str, str]] = {
         'enable_pkce': 'enablePkce',
         'transport': 'transport',
         'tcp_bridge_password': 'tcpBridgePassword',
+        'bridge_key': 'bridgeKey',
         'run': 'run',
         'watch': 'watch',
         'name': 'name',
@@ -132,6 +134,7 @@ SECTION_FIELD_MAPS: dict[str, dict[str, str]] = {
         'save_profile': 'saveProfile',
         'runtime_name': 'runtimeName',
         'tcp_bridge_password': 'tcpBridgePassword',
+        'bridge_key': 'bridgeKey',
         'run': 'run',
         'watch': 'watch',
         'name': 'name',
@@ -341,6 +344,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help='Force transport: ssh, tcp-bridge, or auto (try ssh, fall back to tcp bridge)')
         sub.add_argument('--tcp-bridge-password', default=None,
                          help='Password for TCP bridge when the domain requires one')
+        sub.add_argument('--bridge-key', default=None,
+                         help='Owner key of a reserved bridge subdomain; take it from the domain card in the console')
         if command_name == 'connect':
             sub.add_argument('--run', action=argparse.BooleanOptionalAction, default=None)
             sub.add_argument('--watch', action=argparse.BooleanOptionalAction, default=None)
@@ -367,6 +372,8 @@ def build_parser() -> argparse.ArgumentParser:
     bridge_parser.add_argument('--runtime-name', default=None)
     bridge_parser.add_argument('--tcp-bridge-password', default=None,
         help='Password for TCP bridge when the domain requires one')
+    bridge_parser.add_argument('--bridge-key', default=None,
+        help='Owner key of a reserved bridge subdomain; take it from the domain card in the console')
     bridge_parser.add_argument('--run', action=argparse.BooleanOptionalAction, default=None)
     bridge_parser.add_argument('--watch', action=argparse.BooleanOptionalAction, default=None)
     bridge_parser.add_argument('--name', default=None)
@@ -1615,6 +1622,9 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
         session_strategy=settings.get('sessionStrategy'),
         enable_pkce=bool(settings.get('enablePkce')),
         tcp_bridge_password=settings.get('tcpBridgePassword'),
+        # Переменная окружения нужна не для удобства: ключ в командной строке
+        # виден в списке процессов и остаётся в истории оболочки.
+        bridge_key=settings.get('bridgeKey') or os.getenv('TUNNELLIO_BRIDGE_KEY') or None,
     )
     log_progress(verbose, f'Building {command} plan')
     # With an API token the full flow covers every mode. Without one, the
