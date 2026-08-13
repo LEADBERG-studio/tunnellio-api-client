@@ -7,12 +7,20 @@ TCP bridge — это альтернативный транспорт для т�
 
 ## Wire protocol
 - Control port: 7835 (TCP)
-- Сообщения: null-delimited JSON frames (max 256 байт)
+- Сообщения: null-delimited JSON frames (max 8192 байт, как на сервере)
 - **Native Tunnellio format** (когда сервер возвращает `clientProtocol.hello`):
-  - Client hello: `{"type":"hello","hostname":"demo-app","password":"demo-secret"}`
-  - Server hello: `{"type":"hello","port":51000}`
-  - Connection: `{"type":"connection","connectionId":"..."}`
-  - Accept: `{"type":"accept","connectionId":"...","password":"..."}`
+  - Client hello: `{"type":"hello","hostname":"demo-app","token":"brg_...","password":"demo-secret"}`
+  - Server hello: `{"type":"hello","hostname":"demo-app","port":443,"publicUrl":"https://demo-app..."}`
+  - Connection: `{"type":"connection","id":"...","hostname":"demo-app"}`
+  - Accept: `{"type":"accept","id":"...","connectionId":"...","token":"brg_..."}`
+  - Heartbeat: `{"type":"heartbeat"}` в обе стороны
+  - Отказ: `{"type":"error","code":"..."}`
+- Идентификатор соединения посылается под двумя именами (`id` и `connectionId`):
+  сервер читает первое, старые клиенты присылали второе, и на этом расхождении
+  каждое соединение отвечало `connection_not_found`.
+- Тишина в control-канале — это не разрыв. Сервер шлёт heartbeat раз в 30 с,
+  клиент — раз в 15 с; тот, кто считает тишину концом связи, отваливается через
+  полсекунды после успешного рукопожатия.
 - **Bore-compatible format** (fallback, когда `clientProtocol` отсутствует):
   - `ClientMessage`: `Hello(port)`, `Accept(uuid)`, `Authenticate(hmac_hex)`
   - `ServerMessage`: `Challenge(uuid)`, `Hello(port)`, `Heartbeat`, `Connection(uuid)`, `Error(msg)`
@@ -52,11 +60,53 @@ Connection profile возвращает:
 ```
 
 Когда `passwordRequired = true`, клиент автоматически:
-1. берёт пароль из `tcpBridge.token`, `--tcp-bridge-password` или `TUNNELLIO_TCP_BRIDGE_PASSWORD`
+1. берёт пароль из `--tcp-bridge-password` или `TUNNELLIO_TCP_BRIDGE_PASSWORD`
 2. добавляет `"password"` в hello frame
 3. добавляет `"password"` в accept frame для каждого соединения
 
+Пароль **не берётся** из `tcpBridge.token`: там лежит ключ адреса, это другая
+сущность. Подстановка одного вместо другого давала гарантированный
+`invalid_bridge_password` на каждом домене с паролем.
+
 Если пароль неверен, сервер возвращает `invalid_bridge_password` и отказывает в сессии.
+
+## Ключ адреса (owner key)
+Ключ выдаётся вместе с поддоменом, живёт в записи домена и приезжает в
+`connectionProfile.tcpBridge.token` тому, кто этим адресом владеет. Клиент
+кладёт его в поле `token` кадра `hello`.
+
+Зачем: без него мост пускал на любое имя, а существующий сеанс с тем же именем
+закрывался как `replaced`. То есть любой, кто знал чужой поддомен, забирал живой
+туннель себе.
+
+Поведение сервера:
+- неверный ключ — `invalid_bridge_key`, всегда, это не настраивается;
+- незнакомое имя — `unknown_hostname`;
+- база недоступна — `bridge_unavailable`, а не «пускаем всех»;
+- ключа нет вовсе — зависит от `TCP_BRIDGE_OWNER_KEY_REQUIRED` на сервере.
+  Пока `0`: старый клиент проходит, но пишется в журнал строкой
+  `bridge.legacy` — по ней видно, кого осталось обновить. После `1` —
+  `bridge_key_required`.
+
+Признак строгости виден клиенту в `tcpBridge.ownerKeyRequired`, `/v1/meta` и
+`/v1/capabilities`.
+
+## Ключ SSH здесь не участвует
+Сессия моста открывается **без** `keyId`, и это штатный случай: SSH в мосту не
+участвует вовсе. `POST /v1/sessions/open` принимает запрос без ключа, если режим
+домена `tcp_bridge` или `auto`. Явно переданный неверный `keyId` по-прежнему
+отбивается как `validation_error`, а Direct SSH без ключа так и остаётся
+невозможным. `heartbeat`, `resume` и `close` ключа не требуют и не требовали.
+
+## OAuth через мост не работает
+Мост передаёт байты насквозь между посетителем и чужой программой; наш код в
+этом обмене не участвует, и проверить токен негде. Домен с `connectionMode:
+tcp_bridge` и `authMode: oauth` или `dual` теперь отвергается сразу, кодом
+`oauth_requires_proxy` — и при создании домена, и при открытии сессии. Раньше
+такой домен выглядел защищённым в консоли и был открыт всему интернету.
+
+Токен умеет проверять только Cloud proxy: через него запрос действительно идёт
+нашими руками.
 
 ## Два способа запуска
 
