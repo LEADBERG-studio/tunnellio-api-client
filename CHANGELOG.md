@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.6.1
+
+### The TCP bridge actually raises a tunnel
+
+Every piece below was enough on its own to leave `connect --transport tcp-bridge`
+dead, and all of them were in place at once. A configured domain on a registered
+account could not be published at all; a random one only appeared to work
+because nothing ever asked it for a request.
+
+- The owner key of the hostname is sent in the `hello` frame. It arrives in the
+  connection profile together with the address and proves the right to publish
+  under that name. Before, anyone who knew a subdomain took over a live tunnel:
+  the server closed the previous session as `replaced` without asking anything.
+- The key is sent whenever the server provides one, not only when the server
+  demands one. A soft server still learns who it is talking to.
+- The bridge password is no longer taken from the session token. They are
+  different things, and substituting one for the other guaranteed
+  `invalid_bridge_password` on every password-protected domain.
+- The challenge handshake is skipped for the native protocol. Our bridge never
+  sends `Challenge`, so every connection sat waiting for it until the timeout,
+  which looked like a tunnel that came up and then ignored requests.
+- Silence in the control channel is no longer mistaken for a disconnect. We
+  waited half a second, the server sends a heartbeat every thirty, so the bridge
+  died half a second after a successful handshake.
+- The client sends its own heartbeat every fifteen seconds. Nothing requires it,
+  but a home router forgets an idle mapping without saying a word, and a tunnel
+  that stood overnight led nowhere by morning.
+- A missing public port is no longer a failed handshake. The HTTP bridge
+  publishes by name; there may be no port number in the answer at all.
+- The connection id is sent under both names (`id` and `connectionId`). The
+  server reads the first, we sent the second, and every connection ended in
+  `connection_not_found`.
+- Frame limit raised to 8192 bytes, matching the server. 256 was enough until
+  the greeting grew an address and a port, and then the frame was cut mid-JSON.
+- `.well-known/oauth-protected-resource` is no longer requested from the public
+  address on legacy or bridge domains. There is someone else's program behind
+  that address; it answers 404, and the 404 landed in the log as an error.
+- `Runtime name:` is printed once. The second, empty line is gone.
+
 ## 0.6.0
 
 ### Credential-aware connection modes
