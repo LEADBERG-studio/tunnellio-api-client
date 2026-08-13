@@ -221,6 +221,9 @@ class TcpBridgeProcess:
         self._threads: list[_ConnectionThread] = []
         self._last_heartbeat = 0.0
         self._thread: threading.Thread | None = None
+        # Остановка бывает только по просьбе: terminate() или kill(). Всё
+        # остальное - обрыв, который надо пережить, а не повод умирать.
+        self._stopping = False
         TcpBridgeProcess._pid_counter += 1
         self._pid = -TcpBridgeProcess._pid_counter
 
@@ -237,6 +240,18 @@ class TcpBridgeProcess:
         return self._remote_port
 
     def start(self) -> None:
+        self._open_control()
+        self._thread = threading.Thread(target=self._control_loop, daemon=True)
+        self._thread.start()
+
+    def _open_control(self) -> None:
+        """Соединиться и представиться.
+
+        Вынесено из start() отдельно, потому что то же самое нужно повторять при
+        восстановлении связи. Сервер держит имя в памяти и забывает его, как
+        только управляющий сокет закрылся, поэтому переподключение - это не
+        "открыть сокет заново", а целиком повторить рукопожатие.
+        """
         self._control_sock = _connect(self._host, self._control_port)
         if self._secret and self._hello_template is None:
             if not _auth_handshake(self._control_sock, self._secret):
@@ -278,13 +293,56 @@ class TcpBridgeProcess:
             self._remote_port = int(hello['Hello'])
         if self._logger:
             self._logger(f'Bridge connected: {self._host}:{self._remote_port}')
-        self._thread = threading.Thread(target=self._control_loop, daemon=True)
-        self._thread.start()
 
     def _control_loop(self) -> None:
-        assert self._control_sock is not None
+        """Держать связь, пока не попросили остановиться.
+
+        Обрыв управляющего канала - это не конец работы. Домашний роутер
+        забывает сопоставление адресов молча, провайдер рвёт долгие соединения,
+        сервер перезапускается. Раньше на любом из этих событий мост тихо
+        выставлял returncode и умирал: снаружи это выглядело как "туннель
+        поднялся и через несколько минут отвалился без причины", а надзор
+        сверху лишь печатал "restarting" и поднимал всё заново с нуля.
+
+        Теперь связь восстанавливается здесь же, с нарастающей паузой, и
+        адрес остаётся тем же: имя в рукопожатии не меняется.
+        """
+        backoff = 1.0
+        while not self._stopping:
+            alive_since = time.monotonic()
+            self._serve_control()
+            if self._stopping:
+                break
+            # Соединение, продержавшееся минуту, считаем состоявшимся: пауза
+            # сбрасывается, чтобы редкие обрывы не превращались в полминуты
+            # ожидания на ровном месте.
+            if time.monotonic() - alive_since > 60:
+                backoff = 1.0
+            if self._logger:
+                self._logger(f'Bridge connection lost; reconnecting in {backoff:.0f}s')
+            slept = 0.0
+            while slept < backoff and not self._stopping:
+                time.sleep(0.25)
+                slept += 0.25
+            if self._stopping:
+                break
+            self._close_control()
+            try:
+                self._open_control()
+                backoff = 1.0
+            except Exception as exc:
+                if self._logger:
+                    self._logger(f'Bridge reconnect failed: {type(exc).__name__}: {exc}')
+                backoff = min(backoff * 2, 30.0)
+        with self._lock:
+            self._returncode = 0
+
+    def _serve_control(self) -> None:
+        """Обслуживать один установленный сеанс. Возврат = связь потеряна."""
+        if self._control_sock is None:
+            return
         try:
-            while True:
+            while not self._stopping:
                 msg = _recv_frame(self._control_sock, timeout=0.5, on_silence=SILENCE)
                 if msg is SILENCE:
                     # Тишина в управляющем канале - обычное состояние моста
@@ -340,10 +398,10 @@ class TcpBridgeProcess:
                             self._logger(f'Bridge server error: {msg["Error"]}')
                         break
         except (OSError, ConnectionError):
+            # Связь потеряна. Решение о том, что делать дальше, принимает
+            # _control_loop: здесь нельзя выставлять returncode, иначе надзор
+            # сверху увидит завершившийся процесс и перезапустит весь мост.
             pass
-        finally:
-            with self._lock:
-                self._returncode = 0
 
     def _maybe_heartbeat(self) -> None:
         """Подать голос раз в пятнадцать секунд.
@@ -365,21 +423,13 @@ class TcpBridgeProcess:
             pass
 
     def poll(self) -> int | None:
+        # Живым считается процесс, у которого работает управляющий поток.
+        # Состояние сокета здесь больше не проверяется: между обрывом и
+        # восстановлением сокета нет вовсе, и раньше именно это заставляло
+        # надзор объявлять мост мёртвым и перезапускать его целиком - ровно в
+        # тот момент, когда он сам бы восстановился.
         if self._returncode is not None:
             return self._returncode
-        if self._control_sock is not None:
-            try:
-                readable, _, _ = select.select([self._control_sock], [], [], 0.0)
-                if readable:
-                    data = self._control_sock.recv(1, socket.MSG_PEEK)
-                    if not data:
-                        with self._lock:
-                            if self._returncode is None:
-                                self._returncode = 0
-            except (OSError, ConnectionError):
-                with self._lock:
-                    if self._returncode is None:
-                        self._returncode = 0
         if self._thread is not None and not self._thread.is_alive():
             with self._lock:
                 if self._returncode is None:
@@ -387,9 +437,11 @@ class TcpBridgeProcess:
         return self._returncode
 
     def terminate(self) -> None:
+        self._stopping = True
         self._close_control()
 
     def kill(self) -> None:
+        self._stopping = True
         self._close_control()
 
     def wait(self, timeout: float | None = None) -> int:

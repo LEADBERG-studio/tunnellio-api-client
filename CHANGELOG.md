@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.3
+
+### The TCP bridge survives a lost control channel
+
+A dropped control channel is not the end of the work. Home routers forget the
+address mapping without saying anything, providers cut long-lived connections,
+and the server itself restarts. On any of those the bridge used to set its
+return code and die quietly: from the outside it looked like a tunnel that came
+up and then fell over for no reason a few minutes later, while the supervisor
+above only printed `restarting` and rebuilt everything from scratch.
+
+- The control loop now reconnects on its own, with a backoff of 1, 2, 4 up to 30
+  seconds, and repeats the full handshake: the server keeps the hostname in
+  memory and forgets it the moment the socket closes, so reopening a socket is
+  not enough. The published address does not change between attempts.
+- A session that lasted longer than a minute resets the backoff, so occasional
+  drops do not turn into half a minute of waiting.
+- `poll()` no longer inspects the socket. Between a drop and a recovery there is
+  no socket at all, and that is exactly what made the supervisor declare the
+  bridge dead and restart it at the very moment it would have healed itself.
+- Only `terminate()` and `kill()` stop the loop. Everything else is a drop to be
+  survived.
+
+
 ## 0.6.2
 
 ### `--name` wins over a name left in the config
