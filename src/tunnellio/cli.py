@@ -728,6 +728,13 @@ def _apply_explicit_overrides(base_config: dict[str, Any], args: argparse.Namesp
         for arg_name, config_name in SECTION_FIELD_MAPS[effective_command].items():
             if arg_name in explicit:
                 section[config_name] = explicit[arg_name]
+        # --name задаёт человек, и оно должно побеждать значение, осевшее в
+        # конфиге от прошлого запуска. Раньше старшим считался runtimeName, и
+        # забытое там имя молча подменяло то, что просили в командной строке:
+        # процесс поднимался под чужим именем, а status/stop его не находили.
+        # Явный --runtime-name по-прежнему сильнее: он адресует то же поле.
+        if 'name' in explicit and 'runtime_name' not in explicit:
+            section['runtimeName'] = explicit['name']
     return candidate
 
 

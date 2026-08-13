@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.2
+
+### `--name` wins over a name left in the config
+
+- An explicitly passed `--name` now overrides `runtimeName` stored in the launch
+  config. Before, `runtimeName` was the senior field and `--name` only filled it
+  when it was empty: a name left over from an earlier run silently replaced the
+  one asked for on the command line. The tunnel came up under a foreign name,
+  and `status --name` / `stop --name` could not find it.
+- An explicit `--runtime-name` still wins. It addresses the same field directly,
+  so passing both is unambiguous rather than order-dependent.
+
+
 ## 0.6.1
 
 ### The TCP bridge actually raises a tunnel
