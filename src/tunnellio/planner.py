@@ -470,11 +470,18 @@ class Planner:
         meta: Meta | None,
         connection_profile: ConnectionProfile,
     ) -> ProtectedResourceMetadata | None:
-        candidates = [
-            connection_profile.public_url,
+        # Публичный адрес спрашиваем только там, где OAuth вообще участвует.
+        # На legacy-домене и на мосту за этим адресом стоит чужая программа,
+        # она про наши .well-known ничего не знает и отвечает 404, а 404 попадал
+        # в лог как ошибка и путал при разборе настоящих сбоев.
+        auth_mode = (connection_profile.auth_mode or '').strip().lower()
+        candidates = []
+        if auth_mode not in {'legacy', ''} and not connection_profile.is_tcp_bridge:
+            candidates.append(connection_profile.public_url)
+        candidates.extend([
             meta.auth_base_url if meta else None,
             meta.api_base_url if meta else None,
-        ]
+        ])
         for candidate in candidates:
             resource_metadata_url = build_protected_resource_metadata_url(resource_url=candidate)
             if not resource_metadata_url:

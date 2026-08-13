@@ -12,23 +12,52 @@ from typing import Any, Callable
 
 CONTROL_PORT_DEFAULT = 7835
 NETWORK_TIMEOUT = 3.0
-MAX_FRAME_LENGTH = 256
+# Предел кадра тот же, что у сервера. 256 байт хватало ровно до того дня,
+# когда в приветствии моста появились адрес и номер порта: кадр обрывался по
+# счётчику, а выглядело это как молчание сервера.
+MAX_FRAME_LENGTH = 8192
 FRAME_DELIMITER = b'\x00'
 
 
-def _recv_frame(sock: socket.socket, *, timeout: float = NETWORK_TIMEOUT) -> dict[str, Any] | None:
+class _Silence:
+    """Метка "помолчали", а не "разорвали связь".
+
+    Раньше и то и другое возвращалось как None, а управляющий цикл моста
+    принимал None за конец связи и выходил. Ждали мы полсекунды, сервер шлёт
+    heartbeat раз в тридцать секунд - мост умирал через полсекунды после
+    успешного рукопожатия. Снаружи это выглядело как "туннель не поднимается",
+    хотя поднимался он исправно и сразу же ложился.
+    """
+
+    def __repr__(self) -> str:
+        return '<silence>'
+
+
+SILENCE = _Silence()
+
+
+def _recv_frame(sock: socket.socket, *, timeout: float = NETWORK_TIMEOUT, on_silence: Any = None) -> Any:
     buf = bytearray()
     deadline = time.monotonic() + timeout if timeout > 0 else None
     while True:
         if deadline is not None:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                return None
+                if buf:
+                    # Кадр начался и не дочитан. Бросать его нельзя: следующий
+                    # разбор начнётся с середины JSON и развалится. Ждём ещё
+                    # столько же, пока байты действительно идут.
+                    deadline = time.monotonic() + timeout
+                    continue
+                return on_silence
             sock.settimeout(remaining)
         try:
             chunk = sock.recv(1)
         except socket.timeout:
-            return None
+            if buf:
+                deadline = time.monotonic() + timeout if timeout > 0 else None
+                continue
+            return on_silence
         if not chunk:
             return None
         if chunk == FRAME_DELIMITER:
@@ -119,7 +148,12 @@ class _ConnectionThread(threading.Thread):
             self._logger(f'Connection {self._conn_id}: handling')
         try:
             remote_sock = _connect(self._host, self._control_port)
-            if self._secret:
+            # Рукопожатие с загадкой - это старый протокол, где сервер первым
+            # присылает Challenge. В родном протоколе моста никакой загадки нет:
+            # ключ идёт прямо в кадре. Ждать здесь Challenge значило стоять до
+            # таймаута на каждом соединении, а снаружи это выглядело как
+            # "туннель поднялся, но не отвечает".
+            if self._secret and self._hello_template is None:
                 if not _auth_handshake(remote_sock, self._secret):
                     if self._logger:
                         self._logger(f'Connection {self._conn_id}: auth failed')
@@ -128,9 +162,16 @@ class _ConnectionThread(threading.Thread):
             if self._hello_template is not None:
                 accept_frame = dict(self._hello_template)
                 accept_frame['type'] = 'accept'
+                # Идентификатор кладётся под двумя именами. Сервер читает id,
+                # мы исторически посылали connectionId, и на этом расхождении
+                # каждое соединение отвечало connection_not_found: мост звал,
+                # клиент приходил, а встретиться они не могли.
                 accept_frame['connectionId'] = self._conn_id
+                accept_frame['id'] = self._conn_id
                 if self._password:
                     accept_frame['password'] = self._password
+                if self._secret:
+                    accept_frame['token'] = self._secret
                 _send_frame(remote_sock, accept_frame)
             else:
                 _send_frame(remote_sock, {'Accept': self._conn_id})
@@ -178,6 +219,7 @@ class TcpBridgeProcess:
         self._returncode: int | None = None
         self._lock = threading.Lock()
         self._threads: list[_ConnectionThread] = []
+        self._last_heartbeat = 0.0
         self._thread: threading.Thread | None = None
         TcpBridgeProcess._pid_counter += 1
         self._pid = -TcpBridgeProcess._pid_counter
@@ -196,13 +238,21 @@ class TcpBridgeProcess:
 
     def start(self) -> None:
         self._control_sock = _connect(self._host, self._control_port)
-        if self._secret:
+        if self._secret and self._hello_template is None:
             if not _auth_handshake(self._control_sock, self._secret):
                 raise RuntimeError('TCP bridge authentication failed')
         if self._hello_template is not None:
             hello_frame = dict(self._hello_template)
             if self._password:
                 hello_frame['password'] = self._password
+            # Ключ адреса. Он подтверждает право поднять мост под этим именем и
+            # приходит в профиле подключения вместе с самим именем. Пароль - это
+            # другое: его задаёт владелец, и он идёт своим полем.
+            if self._secret:
+                hello_frame['token'] = self._secret
+            if self._hostname and not hello_frame.get('hostname'):
+                hello_frame['hostname'] = self._hostname
+            hello_frame.setdefault('localTarget', f'{self._local_host}:{self._local_port}')
             _send_frame(self._control_sock, hello_frame)
         else:
             _send_frame(self._control_sock, {'Hello': self._requested_port})
@@ -212,12 +262,16 @@ class TcpBridgeProcess:
         if 'Error' in hello:
             raise RuntimeError(f'TCP bridge handshake failed: {hello["Error"]}')
         if self._hello_template is not None:
+            if str(hello.get('type') or '').lower() == 'error':
+                raise RuntimeError(f'TCP bridge handshake rejected: {hello.get("code") or hello}')
             remote_port = hello.get('port') or hello.get('publicPort')
             if remote_port is None and 'Hello' in hello:
                 remote_port = hello['Hello']
-            if remote_port is None:
-                raise RuntimeError(f'TCP bridge handshake failed: {hello}')
-            self._remote_port = int(remote_port)
+            # HTTP-мост публикует туннель по имени, а не по номеру порта, и
+            # номера в ответе может не быть вовсе. Раньше это считалось провалом
+            # рукопожатия, хотя сервер уже принял имя и был готов передавать
+            # запросы: туннель отказывался работать на ровном месте.
+            self._remote_port = int(remote_port) if remote_port is not None else None
         else:
             if 'Hello' not in hello:
                 raise RuntimeError(f'TCP bridge handshake failed: {hello}')
@@ -231,7 +285,12 @@ class TcpBridgeProcess:
         assert self._control_sock is not None
         try:
             while True:
-                msg = _recv_frame(self._control_sock, timeout=0.5)
+                msg = _recv_frame(self._control_sock, timeout=0.5, on_silence=SILENCE)
+                if msg is SILENCE:
+                    # Тишина в управляющем канале - обычное состояние моста
+                    # между запросами, а не разрыв.
+                    self._maybe_heartbeat()
+                    continue
                 if msg is None:
                     break
                 if self._hello_template is not None:
@@ -285,6 +344,25 @@ class TcpBridgeProcess:
         finally:
             with self._lock:
                 self._returncode = 0
+
+    def _maybe_heartbeat(self) -> None:
+        """Подать голос раз в пятнадцать секунд.
+
+        Сервер сам ничего не требует, но между нами лежит домашний роутер, и
+        сопоставление адресов он забывает молча. Туннель, простоявший ночь без
+        единого байта, наутро уже никуда не ведёт, и узнаётся это только первым
+        потерянным запросом. Дешевле напоминать о себе.
+        """
+        if self._hello_template is None or self._control_sock is None:
+            return
+        now = time.monotonic()
+        if now - self._last_heartbeat < 15.0:
+            return
+        self._last_heartbeat = now
+        try:
+            _send_frame(self._control_sock, {'type': 'heartbeat'})
+        except (OSError, ConnectionError):
+            pass
 
     def poll(self) -> int | None:
         if self._returncode is not None:

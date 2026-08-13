@@ -641,7 +641,8 @@ def _close_runtime_session(
 
 def _announce_plan(logger: RuntimeLogger, result: PlanResult, health_url: str) -> None:
     cp = result.connection_profile
-    logger.log(f'Runtime name: {""}')
+    # Имя запуска печатает вызывающий: здесь оно было пустым и вылезало в вывод
+    # второй строкой "Runtime name:" без значения.
     logger.log(f'Public URL: {cp.public_url}')
     logger.log(f'Health URL: {health_url}')
     if cp.is_tcp_bridge:
@@ -1114,11 +1115,18 @@ def _run_once(
     if is_native_bridge:
         tb = cp.tcp_bridge
         assert tb is not None
-        secret = tb.token if tb.auth_required else None
+        # Ключ отдаём всегда, когда сервер его прислал, а не только когда он
+        # объявил authRequired. Признак говорит "без ключа не пустят", но
+        # прислать ключ полезно и в мягком режиме: сервер тогда знает, что перед
+        # ним владелец адреса, а не случайный клиент, знающий имя.
+        secret = tb.token
         hello_template = None
         if tb.client_protocol and tb.client_protocol.hello:
             hello_template = dict(tb.client_protocol.hello)
-        password = tb.token if tb.password_required else None
+        # Пароль моста и служебный токен - разные вещи. Токен выдаётся сервером
+        # на сеанс, пароль задаёт владелец домена, и подставлять первый вместо
+        # второго значило гарантированный отказ invalid_bridge_password.
+        password = None
         if tb.password_required and not password:
             if settings.get('tcpBridgePassword'):
                 password = str(settings.get('tcpBridgePassword'))
