@@ -17,6 +17,10 @@ NETWORK_TIMEOUT = 3.0
 # счётчику, а выглядело это как молчание сервера.
 MAX_FRAME_LENGTH = 8192
 FRAME_DELIMITER = b'\x00'
+# Сколько попыток восстановить связь своими силами перед тем, как отдать дело
+# надзору. Короткие обрывы лечатся здесь и незаметно; всё, что не вылечилось
+# за это время, лечится только заново полученным профилем подключения.
+RECONNECT_GIVE_UP = 5
 
 
 class _Silence:
@@ -308,6 +312,7 @@ class TcpBridgeProcess:
         адрес остаётся тем же: имя в рукопожатии не меняется.
         """
         backoff = 1.0
+        failures = 0
         while not self._stopping:
             alive_since = time.monotonic()
             self._serve_control()
@@ -331,9 +336,24 @@ class TcpBridgeProcess:
                 self._open_control()
                 backoff = 1.0
             except Exception as exc:
+                failures += 1
                 if self._logger:
-                    self._logger(f'Bridge reconnect failed: {type(exc).__name__}: {exc}')
+                    self._logger(
+                        f'Bridge reconnect failed ({failures}/{RECONNECT_GIVE_UP}): '
+                        f'{type(exc).__name__}: {exc}'
+                    )
                 backoff = min(backoff * 2, 30.0)
+                if failures >= RECONNECT_GIVE_UP:
+                    # Дальше своими силами не выйдет. Сдаёмся надзору: он
+                    # заново спросит у сервера профиль подключения и поднимет
+                    # мост с нуля. Именно так годами живёт SSH-режим - процесс
+                    # умирает, надзор его поднимает, - и упорствовать здесь
+                    # значит подменять рабочий механизм своим худшим.
+                    if self._logger:
+                        self._logger('Bridge giving up; supervisor will rebuild the tunnel')
+                    break
+            else:
+                failures = 0
         with self._lock:
             self._returncode = 0
 
