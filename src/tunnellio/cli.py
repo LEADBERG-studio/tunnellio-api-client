@@ -738,6 +738,23 @@ def _apply_explicit_overrides(base_config: dict[str, Any], args: argparse.Namesp
     return candidate
 
 
+def _health_failures(settings: dict[str, Any]) -> int:
+    """Сколько подряд неудачных проверок считать поводом для перезапуска.
+
+    Ноль означает "не перезапускать никогда": проверка остаётся, её результат
+    виден в журнале и в status, но решения о жизни туннеля не принимает.
+    Через `or 3` ноль было не выразить - он молча превращался в тройку.
+    """
+    value = settings.get('healthFailures')
+    if value is None or value == '':
+        return 3
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 3
+    return max(parsed, 0)
+
+
 def _is_interactive() -> bool:
     return bool(sys.stdin and sys.stdin.isatty())
 
@@ -1270,7 +1287,8 @@ def _run_once(
                 )
             else:
                 consecutive_failures += 1
-                logger.log(f'Health failed via {tls_backend} ({consecutive_failures}/{health_failures}): {detail}')
+                limit = health_failures if health_failures > 0 else 'наблюдение'
+                logger.log(f'Health failed via {tls_backend} ({consecutive_failures}/{limit}): {detail}')
                 _write_status(
                     status_path,
                     {
@@ -1288,7 +1306,12 @@ def _run_once(
                         **_serialize_session(active_session),
                     },
                 )
-                if consecutive_failures >= health_failures:
+                # health_failures = 0 - только наблюдать, не перезапускать.
+                # Проверка ходит снаружи, через чужую инфраструктуру, и её 404
+                # не означает, что мост мёртв. Убивать рабочий туннель по
+                # чужому ответу - худшее из решений: мост умеет держать связь и
+                # восстанавливать её сам, а перезапуск начинает всё с нуля.
+                if health_failures > 0 and consecutive_failures >= health_failures:
                     reason = 'health_failures'
                     raise TunnelUnhealthy()
 
@@ -1672,7 +1695,7 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
                     health_path=str(settings.get('healthPath') or '/'),
                     health_interval=int(settings.get('healthInterval') or 15),
                     health_timeout=int(settings.get('healthTimeout') or 10),
-                    health_failures=int(settings.get('healthFailures') or 3),
+                    health_failures=_health_failures(settings),
                     status_path=status_path,
                     stop_file=stop_file,
                 )
@@ -1688,7 +1711,7 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
                     health_path=str(settings.get('healthPath') or '/'),
                     health_interval=int(settings.get('healthInterval') or 15),
                     health_timeout=int(settings.get('healthTimeout') or 10),
-                    health_failures=int(settings.get('healthFailures') or 3),
+                    health_failures=_health_failures(settings),
                     restart_delay=int(settings.get('restartDelay') or 5),
                     max_restarts=int(settings.get('maxRestarts') or 0),
                     status_path=status_path,
@@ -1706,7 +1729,7 @@ def _execute_from_config(config_payload: dict[str, Any]) -> int:
                 health_path=str(settings.get('healthPath') or '/'),
                 health_interval=int(settings.get('healthInterval') or 15),
                 health_timeout=int(settings.get('healthTimeout') or 10),
-                health_failures=int(settings.get('healthFailures') or 3),
+                health_failures=_health_failures(settings),
                 status_path=status_path,
                 stop_file=stop_file,
             )

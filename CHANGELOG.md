@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.4
+
+### A failing health probe no longer kills a working tunnel
+
+`healthFailures` / `--health-failures 0` now means "watch only". The probe still
+runs, its result still lands in the log and in `status`, but it no longer decides
+whether the tunnel lives.
+
+The probe reaches the local service from the outside, across infrastructure we do
+not control: a CDN, a fallback upstream, someone else's 404. None of that proves
+the bridge is dead, and killing a working tunnel over a stranger's answer is the
+worst available outcome, because a restart throws away a healthy connection and
+starts from nothing. The bridge maintains and restores its own control channel
+(0.6.3), so a supervisor that reacts to a foreign HTTP status is fighting it.
+
+- Zero could not be expressed before: `int(settings.get('healthFailures') or 3)`
+  silently turned it into three.
+- In watch-only mode the log prints the failure count without a threshold, so it
+  is obvious no restart is coming.
+
+
 ## 0.6.3
 
 ### The TCP bridge survives a lost control channel
