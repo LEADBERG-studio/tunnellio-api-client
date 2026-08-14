@@ -21,6 +21,43 @@ FRAME_DELIMITER = b'\x00'
 # надзору. Короткие обрывы лечатся здесь и незаметно; всё, что не вылечилось
 # за это время, лечится только заново полученным профилем подключения.
 RECONNECT_GIVE_UP = 5
+# Как часто напоминать о себе и сколько ждать признаков жизни в ответ.
+#
+# Обрыв в дороге не закрывает соединение: до нас не доходит ни FIN, ни RST.
+# Сокет выглядит живым, запись в него не ошибка, а строка в буфере ядра, и
+# ядро повторяет попытки минутами. Пока мы верили молчанию, туннель
+# «работал», не ведя никуда: узнавалось это только первым потерянным
+# запросом, то есть от пользователя.
+#
+# Сервер отвечает на каждый наш стук, поэтому тишина дольше срока ниже -
+# это не спокойный вечер, а оборванный провод.
+HEARTBEAT_INTERVAL = 15.0
+SILENCE_LIMIT = 45.0
+# Проверка живости на уровне ядра. По умолчанию оно замечает обрыв через два
+# часа - столько мёртвый туннель висеть не должен.
+KEEPALIVE_IDLE = 30
+KEEPALIVE_INTERVAL = 10
+KEEPALIVE_FAILURES = 3
+
+
+def _watch_liveness(sock: socket.socket) -> None:
+    """Попросить ядро само проверять, жив ли собеседник."""
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    except OSError:
+        return
+    for name, value in (('TCP_KEEPIDLE', KEEPALIVE_IDLE),
+                        ('TCP_KEEPINTVL', KEEPALIVE_INTERVAL),
+                        ('TCP_KEEPCNT', KEEPALIVE_FAILURES)):
+        option = getattr(socket, name, None)
+        if option is None:
+            # На части систем этих имён нет; остаётся keepalive со сроками по
+            # умолчанию, и это лучше, чем ничего.
+            continue
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, option, value)
+        except OSError:
+            pass
 
 
 class _Silence:
@@ -101,6 +138,20 @@ def _auth_handshake(sock: socket.socket, secret: str) -> bool:
     return True
 
 
+def _shutdown(sock: socket.socket | None) -> None:
+    """Закрыть сокет и не выяснять, почему не получилось."""
+    if sock is None:
+        return
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+    try:
+        sock.close()
+    except OSError:
+        pass
+
+
 def _connect(host: str, port: int, timeout: float = NETWORK_TIMEOUT) -> socket.socket:
     sock = socket.create_connection((host, port), timeout=timeout)
     sock.settimeout(None)
@@ -150,6 +201,7 @@ class _ConnectionThread(threading.Thread):
     def run(self) -> None:
         if self._logger:
             self._logger(f'Connection {self._conn_id}: handling')
+        remote_sock = None
         try:
             remote_sock = _connect(self._host, self._control_port)
             # Рукопожатие с загадкой - это старый протокол, где сервер первым
@@ -179,12 +231,27 @@ class _ConnectionThread(threading.Thread):
                 _send_frame(remote_sock, accept_frame)
             else:
                 _send_frame(remote_sock, {'Accept': self._conn_id})
-            local_sock = _connect(self._local_host, self._local_port)
+            try:
+                local_sock = _connect(self._local_host, self._local_port)
+            except (OSError, ConnectionError):
+                # Своя программа не отвечает: порт занят не тем, сервис ещё не
+                # поднялся, адрес не тот. Соединение с мостом надо закрыть
+                # немедленно - иначе оно висит у сервера в ожидании, а
+                # посетитель ждёт своего таймаута вместо честного отказа.
+                if self._logger:
+                    self._logger(
+                        f'Connection {self._conn_id}: local {self._local_host}:{self._local_port} '
+                        f'refused the connection'
+                    )
+                _shutdown(remote_sock)
+                raise
             _bidirectional_copy(local_sock, remote_sock)
         except (OSError, ConnectionError) as exc:
+            _shutdown(remote_sock)
             if self._logger:
                 self._logger(f'Connection {self._conn_id}: error: {exc}')
         except Exception as exc:
+            _shutdown(remote_sock)
             if self._logger:
                 self._logger(f'Connection {self._conn_id}: unexpected error: {exc}')
 
@@ -224,6 +291,9 @@ class TcpBridgeProcess:
         self._lock = threading.Lock()
         self._threads: list[_ConnectionThread] = []
         self._last_heartbeat = 0.0
+        # Когда мы последний раз получили от сервера хоть что-нибудь. Молчание
+        # дольше срока означает оборванный провод, а не спокойный вечер.
+        self._last_seen = 0.0
         self._thread: threading.Thread | None = None
         # Остановка бывает только по просьбе: terminate() или kill(). Всё
         # остальное - обрыв, который надо пережить, а не повод умирать.
@@ -257,6 +327,9 @@ class TcpBridgeProcess:
         "открыть сокет заново", а целиком повторить рукопожатие.
         """
         self._control_sock = _connect(self._host, self._control_port)
+        _watch_liveness(self._control_sock)
+        self._last_seen = time.monotonic()
+        self._last_heartbeat = 0.0
         if self._secret and self._hello_template is None:
             if not _auth_handshake(self._control_sock, self._secret):
                 raise RuntimeError('TCP bridge authentication failed')
@@ -366,11 +439,22 @@ class TcpBridgeProcess:
                 msg = _recv_frame(self._control_sock, timeout=0.5, on_silence=SILENCE)
                 if msg is SILENCE:
                     # Тишина в управляющем канале - обычное состояние моста
-                    # между запросами, а не разрыв.
+                    # между запросами, а не разрыв. Но бесконечной она быть не
+                    # может: сервер отвечает на каждый наш стук, и если ответов
+                    # нет дольше срока, соединения уже нет - как бы живо оно ни
+                    # выглядело со стороны ядра.
+                    if self._last_seen and time.monotonic() - self._last_seen > SILENCE_LIMIT:
+                        if self._logger:
+                            self._logger(
+                                f'Bridge silent for {SILENCE_LIMIT:.0f}s; treating the line as dead'
+                            )
+                        break
                     self._maybe_heartbeat()
                     continue
                 if msg is None:
                     break
+                self._last_seen = time.monotonic()
+                self._reap_threads()
                 if self._hello_template is not None:
                     msg_type = msg.get('type')
                     if msg_type == 'connection':
@@ -434,13 +518,26 @@ class TcpBridgeProcess:
         if self._hello_template is None or self._control_sock is None:
             return
         now = time.monotonic()
-        if now - self._last_heartbeat < 15.0:
+        if now - self._last_heartbeat < HEARTBEAT_INTERVAL:
             return
         self._last_heartbeat = now
         try:
             _send_frame(self._control_sock, {'type': 'heartbeat'})
         except (OSError, ConnectionError):
+            # Ошибка записи здесь - редкость: в оборванный сокет запись
+            # удаётся, байты уходят в буфер ядра. Поэтому вывод о смерти
+            # делается по отсутствию ответов, а не по этой ошибке.
             pass
+
+    def _reap_threads(self) -> None:
+        """Забыть обслуженные соединения.
+
+        Список жил всё время работы моста и никогда не чистился: у долгоживущего
+        туннеля он растёт на каждый запрос, а вместе с ним - память процесса,
+        который обязан работать месяцами.
+        """
+        with self._lock:
+            self._threads = [item for item in self._threads if item.is_alive()]
 
     def poll(self) -> int | None:
         # Живым считается процесс, у которого работает управляющий поток.
@@ -458,10 +555,12 @@ class TcpBridgeProcess:
 
     def terminate(self) -> None:
         self._stopping = True
+        self._say_goodbye()
         self._close_control()
 
     def kill(self) -> None:
         self._stopping = True
+        self._say_goodbye()
         self._close_control()
 
     def wait(self, timeout: float | None = None) -> int:
@@ -470,6 +569,21 @@ class TcpBridgeProcess:
         if self._returncode is None:
             self._returncode = 0
         return self._returncode
+
+    def _say_goodbye(self) -> None:
+        """Сказать серверу, что уходим.
+
+        Молча закрытый сокет сервер замечает не сразу, и всё это время имя
+        занято прежним сеансом, а недоставленные соединения висят. Кадр close
+        освобождает имя мгновенно, поэтому следующий запуск начинает работать
+        сразу, а не "через какое-то время".
+        """
+        if self._control_sock is None or self._hello_template is None:
+            return
+        try:
+            _send_frame(self._control_sock, {'type': 'close', 'reason': 'client_stopping'})
+        except (OSError, ConnectionError):
+            pass
 
     def _close_control(self) -> None:
         if self._control_sock is not None:

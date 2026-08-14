@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.6.5
+
+### A line broken in transit is no longer mistaken for a quiet evening
+
+Reconnection after a dropped control channel exists since 0.6.3, and it works -
+when the drop is visible. A line broken in transit is not visible: no FIN and no
+RST reach either side, the socket stays open, and a write into it is not an error
+but a line in the kernel buffer, retried for minutes. The client trusted that
+silence. The tunnel counted as alive and led nowhere, and the first person to
+find out was whoever tried to open the address.
+
+This is why the bridge appeared not to reconnect at all while SSH always did:
+SSH has `ServerAliveInterval`, and the bridge had a heartbeat that nobody
+answered.
+
+- The server now answers every heartbeat. It could not before: the client knocks
+  more often than the server's read times out, so the server's own heartbeat was
+  never due, and the channel was permanently silent from the client's side.
+- Silence longer than `SILENCE_LIMIT` (45 seconds, three missed answers) is now a
+  verdict rather than a state: the session is dropped and the existing
+  reconnection with its backoff takes over. The published address does not
+  change.
+- The control socket asks the kernel to check liveness as well: keepalive with a
+  30/10/3 schedule instead of the two-hour default, so a dead line is noticed
+  even while the process is idle.
+
+### Sanitation of what a broken line leaves behind
+
+- A connection whose local service refuses the socket now closes its side of the
+  bridge immediately. It used to be left dangling: the server held the request in
+  its pending queue, and the visitor waited out their own timeout instead of
+  getting a straight refusal.
+- The list of served connections is pruned. It was never cleaned, so a
+  long-lived tunnel grew it with every request - in a process expected to run for
+  months.
+
+### Requires the server side from the same release
+
+The heartbeat answer comes from the bridge server. Against an older server the
+client will now reconnect every 45 seconds of idleness: functional, noisy in the
+log, and pointless. Update both.
+
 ## 0.6.4
 
 ### A failing health probe no longer kills a working tunnel
