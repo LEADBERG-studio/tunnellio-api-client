@@ -10,7 +10,16 @@ import time
 import uuid
 from typing import Any, Callable
 
+from . import __version__
+
 CONTROL_PORT_DEFAULT = 7835
+# Чем клиент представляется мосту.
+#
+# Сервер записывает это в журнал и в свой лог с первого дня, но поле никто
+# не заполнял, и в логах стояло «версия не названа». При разборе сбоя это
+# первый вопрос после «кто подключён»: с какой версией говорим. Он же
+# отвечает, кого осталось обновить перед тем, как вводить строгие правила.
+CLIENT_NAME = 'tunnellio-client/%s' % __version__
 NETWORK_TIMEOUT = 3.0
 # Предел кадра тот же, что у сервера. 256 байт хватало ровно до того дня,
 # когда в приветствии моста появились адрес и номер порта: кадр обрывался по
@@ -345,6 +354,7 @@ class TcpBridgeProcess:
             if self._hostname and not hello_frame.get('hostname'):
                 hello_frame['hostname'] = self._hostname
             hello_frame.setdefault('localTarget', f'{self._local_host}:{self._local_port}')
+            hello_frame.setdefault('clientVersion', CLIENT_NAME)
             _send_frame(self._control_sock, hello_frame)
         else:
             _send_frame(self._control_sock, {'Hello': self._requested_port})

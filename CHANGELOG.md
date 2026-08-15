@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.6
+
+### The client says which client it is
+
+The server has recorded the client version since the bridge existed, in the
+journal and in its own log. Nobody ever filled the field, so every session read
+`clientVersion: not given` - including in the log lines that were supposed to
+settle arguments about which side was at fault.
+
+- The `hello` frame now carries `clientVersion` (`tunnellio-client/<version>`).
+  It shows up in the connection journal, in the live-channels view, and in
+  `docker logs` on the server.
+
+That is the whole release. It changes no behaviour and requires nothing on the
+server side: the field was already read and stored, it was simply always empty.
+It matters because it answers the second question of every incident, right after
+"who is connected": with what version are we talking, and who is left to update.
+
 ## 0.6.5
 
 ### A line broken in transit is no longer mistaken for a quiet evening
